@@ -1,6 +1,6 @@
 # 🧠 WebSim Neural Collaborative Interface
 
-> ⚠️ This project is designed to run **exclusively inside WebSim** — it relies on WebSim's internal LLM API and GGUF model handling.
+> ⚠️ This project is designed to run **exclusively inside WebSim** — it relies on WebSim's internal LLM API handling.
 > 
 > ✅ First public commit: **May 9, 2025**
 
@@ -24,7 +24,6 @@ The goal is to enable **fully local AI workflows** with direct control over ever
 - **HTML / CSS / JS** (Vanilla)
 - **WebSim internal APIs**
 - **WebLLM** backend integration (inside WebSim)
-- **GGUF model loader** with live parameter editing
 
 ---
 

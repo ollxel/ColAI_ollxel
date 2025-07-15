@@ -4,6 +4,7 @@ export class UIManager {
     constructor(fileManager) {
         // DOM elements
         this.elements = {};
+        this.currentLanguage = 'en';
         
         // Only initialize elements if we're not in mafia or wiki mode
         if (window.location.hash !== '#mafia' && window.location.hash !== '#wiki') {
@@ -67,6 +68,10 @@ export class UIManager {
             };
         }
 
+        // Add live chat elements
+        this.liveChatElements = {};
+        this.chatMode = 'classic'; // 'classic' or 'live'
+
         this.fileManager = fileManager;
 
         // Check if we're in collaboration mode before setting up event listeners
@@ -104,8 +109,12 @@ export class UIManager {
                     'You are participating in a collaborative discussion. Respond thoughtfully and concisely to the topic.';
             }
         }
+        
+        // Add stream interface elements
+        this.streamElements = {};
+        this.createStreamInterface();
     }
-
+    
     setupEventListeners() {
         // Set up iteration slider and direct input sync
         this.elements.maxIterations.addEventListener('input', () => {
@@ -269,6 +278,202 @@ export class UIManager {
                 }
             }
         });
+        
+        // Add infinite mode toggle
+        document.getElementById('infinite-mode').addEventListener('change', (e) => {
+            if (window.neuralFramework) {
+                window.neuralFramework.infiniteMode = e.target.checked;
+                if (e.target.checked) {
+                    this.addSystemMessage("Infinite mode enabled - discussions will continue indefinitely until manually stopped.");
+                }
+            }
+        });
+
+        // Add live chat mode event listeners
+        this.setupLiveChatListeners();
+    }
+    
+    setupLiveChatListeners() {
+        // Create live chat controls if they don't exist
+        this.createLiveChatControls();
+        
+        // Event listeners for live chat toggles
+        const initiativeToggle = document.getElementById('initiative-enabled');
+        const fragmentedToggle = document.getElementById('fragmented-messages-enabled');
+        const fragmentationSlider = document.getElementById('fragmentation-level');
+        
+        if (initiativeToggle) {
+            initiativeToggle.addEventListener('change', () => {
+                this.updateChatModeDisplay();
+            });
+        }
+        
+        if (fragmentedToggle) {
+            fragmentedToggle.addEventListener('change', () => {
+                this.updateChatModeDisplay();
+            });
+        }
+        
+        if (fragmentationSlider) {
+            fragmentationSlider.addEventListener('input', () => {
+                const value = fragmentationSlider.value;
+                document.getElementById('fragmentation-value').textContent = 
+                    value == 0 ? 'Single Block' : 
+                    value < 0.3 ? 'Long Messages' :
+                    value < 0.7 ? 'Medium Fragments' : 'Short Fragments';
+            });
+        }
+    }
+    
+    createLiveChatControls() {
+        // Find the model settings section
+        const modelSettings = document.querySelector('.model-settings');
+        if (!modelSettings) return;
+        
+        // Create live chat section
+        const liveChatSection = document.createElement('div');
+        liveChatSection.className = 'live-chat-settings';
+        liveChatSection.innerHTML = `
+            <h3>Live Chat Mode Settings</h3>
+            <div class="form-group">
+                <label class="checkbox-label" for="initiative-enabled">
+                    <input type="checkbox" id="initiative-enabled">
+                    Enable Initiative Mode
+                </label>
+                <div class="network-description">Networks compete to respond first, like in real conversations</div>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label" for="fragmented-messages-enabled">
+                    <input type="checkbox" id="fragmented-messages-enabled">
+                    Enable Fragmented Messages
+                </label>
+                <div class="network-description">Networks can send multiple short messages instead of one long response</div>
+            </div>
+            <div class="form-group">
+                <label for="fragmentation-level">Fragmentation Level:</label>
+                <div class="slider-container">
+                    <input type="range" id="fragmentation-level" min="0" max="1" value="0.5" class="slider" step="0.1">
+                    <span id="fragmentation-value">Medium Fragments</span>
+                </div>
+            </div>
+        `;
+        
+        // Insert before advanced settings
+        const advancedSettings = document.getElementById('advanced-settings');
+        if (advancedSettings) {
+            modelSettings.insertBefore(liveChatSection, advancedSettings);
+        } else {
+            modelSettings.appendChild(liveChatSection);
+        }
+    }
+    
+    updateChatModeDisplay() {
+        const initiativeEnabled = document.getElementById('initiative-enabled')?.checked || false;
+        const fragmentedEnabled = document.getElementById('fragmented-messages-enabled')?.checked || false;
+        const isLiveMode = initiativeEnabled || fragmentedEnabled;
+        
+        // Update mode indicator
+        this.updateChatMode(isLiveMode ? 'live' : 'classic');
+        
+        // Show mode status
+        const statusText = isLiveMode ? 
+            (initiativeEnabled && fragmentedEnabled ? 'Live Chat: Initiative + Fragments' :
+             initiativeEnabled ? 'Live Chat: Initiative Mode' : 'Live Chat: Fragmented Mode') :
+            'Classic Mode';
+            
+        // Add or update status indicator
+        let statusIndicator = document.getElementById('chat-mode-status');
+        if (!statusIndicator) {
+            statusIndicator = document.createElement('div');
+            statusIndicator.id = 'chat-mode-status';
+            statusIndicator.className = 'chat-mode-status';
+            const chatHeader = document.querySelector('.chat-header');
+            if (chatHeader) {
+                chatHeader.appendChild(statusIndicator);
+            }
+        }
+        
+        statusIndicator.textContent = statusText;
+        statusIndicator.className = `chat-mode-status ${isLiveMode ? 'live-mode' : 'classic-mode'}`;
+    }
+    
+    updateChatMode(mode) {
+        this.chatMode = mode;
+        const chatContainer = document.querySelector('.chat-container');
+        const chatMessages = document.getElementById('chat-messages');
+        
+        if (chatContainer && chatMessages) {
+            if (mode === 'live') {
+                chatContainer.classList.add('live-chat-mode');
+                chatMessages.classList.add('live-chat-messages');
+            } else {
+                chatContainer.classList.remove('live-chat-mode');
+                chatMessages.classList.remove('live-chat-messages');
+            }
+        }
+    }
+    
+    showLiveChatInterface() {
+        this.updateChatMode('live');
+        this.addSystemMessage('🔥 Live Chat mode activated! Networks will communicate dynamically.');
+    }
+    
+    addLiveChatMessage(networkId, networkName, content, messageData) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `live-message ${networkId}`;
+        messageDiv.dataset.messageId = messageData.id;
+        messageDiv.dataset.sequenceId = messageData.sequenceId;
+        
+        // Check if this is part of a sequence
+        if (messageData.isFragment) {
+            messageDiv.classList.add('message-fragment');
+            
+            // Find the previous message in the sequence
+            const prevSequenceId = messageData.sequenceId.split('-');
+            prevSequenceId[1] = (parseInt(prevSequenceId[1]) - 1).toString();
+            const prevId = prevSequenceId.join('-');
+            
+            const prevMessage = document.querySelector(`[data-sequence-id="${prevId}"]`);
+            if (prevMessage) {
+                messageDiv.classList.add('continued-message');
+            }
+        }
+        
+        const timestamp = new Date(messageData.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        
+        messageDiv.innerHTML = `
+            <div class="live-message-header">
+                <span class="live-message-author">${networkName}</span>
+                <span class="live-message-timestamp">${timestamp}</span>
+            </div>
+            <div class="live-message-content">${content}</div>
+            <div class="live-message-actions">
+                <button class="reply-to-message" data-parent-id="${messageData.id}">Reply</button>
+            </div>
+        `;
+        
+        this.elements.chatMessages.appendChild(messageDiv);
+        
+        // Smooth scroll to bottom
+        setTimeout(() => {
+            this.elements.chatMessages.scrollTop = this.elements.chatMessages.scrollHeight;
+        }, 100);
+        
+        // Add typing effect for live mode
+        if (this.chatMode === 'live') {
+            this.animateMessageAppearance(messageDiv);
+        }
+    }
+    
+    animateMessageAppearance(messageElement) {
+        messageElement.style.opacity = '0';
+        messageElement.style.transform = 'translateY(20px)';
+        
+        setTimeout(() => {
+            messageElement.style.transition = 'all 0.3s ease';
+            messageElement.style.opacity = '1';
+            messageElement.style.transform = 'translateY(0)';
+        }, 50);
     }
 
     createNetworkSettings() {
@@ -319,7 +524,7 @@ export class UIManager {
             } else if (i === 2) {
                 originalPrompt = 'You are a creative thinker with innovative perspectives. Focus on generating novel ideas, considering alternatives, and exploring possibilities beyond the obvious.';
             } else if (i === 3) {
-                originalPrompt = 'You are specialized in practical implementation. Focus on technical feasibility, resource requirements, and concrete steps to bring ideas to reality.';
+                originalPrompt = 'You specialize in practical implementation. Focus on technical feasibility, resource requirements, and concrete steps to bring ideas to reality.';
             } else if (i === 4) {
                 originalPrompt = 'You specialize in data-driven analysis. Focus on statistics, patterns, and evidence-based conclusions derived from data.';
             } else if (i === 5) {
@@ -522,12 +727,12 @@ export class UIManager {
                 fileIcon = `
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="#E44D26" viewBox="0 0 16 16">
                     <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 1 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/>
-                    <path d="M4.603 14.087a.81.81 0 0 1-.438-.42c-.195-.388-.13-.776.08-1.102.198-.307.526-.568.897-.787a7.68 7.68 0 0 1 1.482-.645 19.697 19.697 0 0 0 1.062-2.227 7.269 7.269 0 0 1-.43-1.295c-.086-.4-.119-.796-.046-1.136.075-.354.274-.672.65-.823.192-.077.4-.12.602-.077a.7.7 0 0 1 .477.365c.088.164.12.356.127.538.007.188-.012.396-.047.614-.084.51-.27 1.134-.52 1.794a10.954 10.954 0 0 0 .98 1.686 5.753 5.753 0 0 1 1.334.05c.364.066.734.195.96.465.12.144.193.32.2.518.007.192-.047.382-.138.563a1.04 1.04 0 0 1-.354.416.856.856 0 0 1-.51.138c-.331-.014-.654-.196-.933-.417a5.712 5.712 0 0 1-.911-.95 11.651 11.651 0 0 0-1.997.406 11.307 11.307 0 0 1-1.02 1.51c-.292.35-.609.656-.927.787a.793.793 0 0 1-.58.029zm1.379-1.901c-.166.076-.32.156-.459.238-.328.194-.541.383-.647.547-.094.145-.096.25-.04.361.01.022.02.036.026.044a.266.266 0 0 0 .035-.012c.137-.056.355-.235.635-.572a8.18 8.18 0 0 0 .45-.606zm1.64-1.33a12.71 12.71 0 0 1 1.01-.193 11.744 11.744 0 0 1-.51-.858 20.801 20.801 0 0 1-.5 1.05zm2.446.45c.15.163.296.3.435.41.24.19.407.253.498.256a.107.107 0 0 0 .07-.015.307.307 0 0 0 .094-.125.436.436 0 0 0 .059-.2.095.095 0 0 0-.026-.063c-.052-.062-.2-.152-.518-.209a3.876 3.876 0 0 0-.612-.053zM8.078 7.8a6.7 6.7 0 0 0 .2-.828c.031-.188.043-.343.038-.465a.613.613 0 0 0-.032-.198.517.517 0 0 0-.145.04c-.087.035-.158.106-.196.283-.04.192-.03.469.046.822.024.111.054.227.09.346z"/>
-            </svg>`;
+                    <path d="M4.603 14.087a.81.81 0 0 1-.438-.42c-.195-.388-.13-.776.08-1.102.198-.307.526-.568.897-.787a7.68 7.68 0 0 1 1.482-.645 19.697 19.697 0 0 1-.5 1.05z"/>
+                </svg>`;
             } else if (attachment.type.includes('word')) {
                 fileIcon = `
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="#2B579A" viewBox="0 0 16 16">
-                    <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 1 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/>
+                    <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
                     <path d="M4.5 12.5A.5.5 0 0 1 5 12h3a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm0-2A.5.5 0 0 1 5 10h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5V7s1.54-1.274 1.639-1.208zM6.25 5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5z"/>
                 </svg>`;
             }
@@ -871,18 +1076,12 @@ export class UIManager {
     }
 
     toggleNetworkVisibility(networkNum, visible) {
-        if (networkNum === 3) {
-            this.elements.network3Status.style.display = visible ? 'flex' : 'none';
-        } else if (networkNum === 4) {
-            this.elements.network4Status.style.display = visible ? 'flex' : 'none';
-        } else if (networkNum === 5) {
-            this.elements.network5Status.style.display = visible ? 'flex' : 'none';
-        } else if (networkNum === 6) {
-            this.elements.network6Status.style.display = visible ? 'flex' : 'none';
-        } else if (networkNum === 7) {
-            this.elements.network7Status.style.display = visible ? 'flex' : 'none';
-        } else if (networkNum === 8) {
-            this.elements.network8Status.style.display = visible ? 'flex' : 'none';
+        // Handle built-in networks (1-8)
+        if (networkNum >= 1 && networkNum <= 8) {
+            const element = this.elements[`network${networkNum}Status`];
+            if (element) {
+                element.style.display = visible ? 'flex' : 'none';
+            }
         } else {
             // Handle custom networks beyond 8
             const networkStatus = document.getElementById(`network${networkNum}-status`);
@@ -1000,33 +1199,17 @@ export class UIManager {
         if (framework) {
             const networkIds = framework.networkManager.getNetworkIds();
             networkIds.forEach(networkId => {
-                const networkName = framework.networkManager.networks[networkId].name;
-                const selectContainer = document.createElement('div');
-                selectContainer.className = 'network-model-select';
-                selectContainer.innerHTML = `
-                    <label for="${networkId}-model">${networkName}:</label>
-                    <select id="${networkId}-model">
-                        <option value="default">Default (WebSim)</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="anthropic">Anthropic</option>
-                        <option value="cohere">Cohere</option>
-                        <option value="mistral">Mistral</option>
-                    </select>
-                `;
-                networkModelSelections.appendChild(selectContainer);
-                
-                // Set saved value if exists
-                const savedModel = localStorage.getItem(`${networkId}-model`);
-                if (savedModel) {
-                    document.getElementById(`${networkId}-model`).value = savedModel;
-                }
+                const option = document.createElement('option');
+                option.value = networkId;
+                option.textContent = framework.networkManager.networks[networkId].name;
+                select.appendChild(option);
             });
         }
         
         // Add event listeners for API key saving
         document.querySelectorAll('.save-key-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const provider = e.target.dataset.provider;
+            btn.addEventListener('click', () => {
+                const provider = btn.dataset.provider;
                 const inputElement = document.getElementById(`${provider}-api-key`);
                 if (inputElement && inputElement.value) {
                     localStorage.setItem(`${provider}-api-key`, inputElement.value);
@@ -1059,6 +1242,7 @@ export class UIManager {
         const messageElement = document.createElement('div');
         messageElement.className = `message-popup ${type}`;
         messageElement.textContent = message;
+        
         document.body.appendChild(messageElement);
         
         // Add styles for the message
@@ -1160,10 +1344,10 @@ export class UIManager {
         document.querySelector('#network3-status .status-name').textContent = 'Implementation Network';
         document.querySelector('#network4-status .status-name').textContent = 'Data Science Network';
         document.querySelector('#network5-status .status-name').textContent = 'Ethical Network';
-        document.querySelector('#network6-status .status-name').textContent = 'UX Network';
-        document.querySelector('#network7-status .status-name').textContent = 'Systems Network';
-        document.querySelector('#network8-status .status-name').textContent = 'Devil\'s Advocate';
-        document.querySelector('#summarizer-status .status-name').textContent = 'Synthesizer';
+        document.querySelector('#network6-status .status-name').textContent = 'User Experience Network';
+        document.querySelector('#network7-status .status-name').textContent = 'Systems Thinking Network';
+        document.querySelector('#network8-status .status-name').textContent = 'Devil\'s Advocate Network';
+        document.querySelector('#summarizer-status .status-name').textContent = 'Synthesizer Network';
         
         this.elements.attachmentPreview.innerHTML = '';
         this.fileManager.clearAttachments();
@@ -1279,152 +1463,785 @@ export class UIManager {
         }
     }
 
-    showExportOptions() {
-        const modal = document.createElement('div');
-        modal.className = 'export-modal';
-        modal.innerHTML = `
-            <div class="export-modal-content">
-                <h3>Export Discussion</h3>
-                <p>Choose a format to export the current discussion:</p>
-                <div class="export-options">
-                    <button class="export-option" data-format="json">JSON Format</button>
-                    <button class="export-option" data-format="text">Plain Text</button>
-                    <button class="export-option" data-format="html">HTML Document</button>
-                </div>
-                <div class="modal-buttons">
-                    <button id="cancel-export" class="btn btn-secondary">Cancel</button>
-                </div>
-            </div>
-        `;
+    updateLanguage(languageCode) {
+        if (!languageCode) return;
         
-        document.body.appendChild(modal);
+        this.currentLanguage = languageCode;
         
-        // Add styles for the modal
-        const style = document.createElement('style');
-        style.textContent = `
-            .export-modal {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background-color: rgba(0,0,0,0.5);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                z-index: 1000;
-            }
-            .export-modal-content {
-                background-color: var(--card-bg);
-                padding: 30px;
-                border-radius: 15px;
-                max-width: 500px;
-                width: 90%;
-                box-shadow: var(--shadow);
-            }
-            .export-options {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 15px;
-                margin: 20px 0;
-            }
-            .export-option {
-                flex: 1;
-                min-width: 120px;
-                padding: 15px;
-                background-color: var(--primary-color);
-                color: white;
-                border: none;
-                border-radius: 10px;
-                cursor: pointer;
-                font-weight: 500;
-                transition: all 0.3s ease;
-            }
-            .export-option:hover {
-                transform: translateY(-3px);
-                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            }
-        `;
-        document.head.appendChild(style);
+        // Only update if we have valid elements and translations
+        if (this.elements && Object.keys(this.elements).length > 0) {
+            // Update all translatable text elements
+            this.updateElementTexts(languageCode);
+            
+            // Update placeholders
+            this.updatePlaceholders(languageCode);
+            
+            // Update select options where needed
+            this.updateSelectOptions(languageCode);
+        }
+    }
+    
+    updatePlaceholders(languageCode) {
+        const translations = this.getLanguageTranslations();
         
-        // Add event listeners
-        document.querySelectorAll('.export-option').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const format = btn.dataset.format;
-                if (window.neuralFramework) {
-                    window.neuralFramework.exportDiscussion(format);
-                }
-                document.body.removeChild(modal);
-                document.head.removeChild(style);
-            });
-        });
+        if (this.elements.projectName && translations['Enter topic name'] && translations['Enter topic name'][languageCode]) {
+            this.elements.projectName.placeholder = translations['Enter topic name'][languageCode] || 'Enter topic name';
+        }
+        if (this.elements.projectDescription && translations['Describe the topic you want to explore'] && translations['Describe the topic you want to explore'][languageCode]) {
+            this.elements.projectDescription.placeholder = translations['Describe the topic you want to explore'][languageCode] || 'Describe the topic you want to explore';
+        }
+        if (this.elements.summarizerInstructions && translations['Custom instructions for the Synthesizer Network (optional)'] && translations['Custom instructions for the Synthesizer Network (optional)'][languageCode]) {
+            this.elements.summarizerInstructions.placeholder = translations['Custom instructions for the Synthesizer Network (optional)'][languageCode] || 'Custom instructions for the Synthesizer Network (optional)';
+        }
+        if (this.elements.systemPrompt && translations['Customize the system prompt for networks'] && translations['Customize the system prompt for networks'][languageCode]) {
+            this.elements.systemPrompt.placeholder = translations['Customize the system prompt for networks'][languageCode] || 'Customize the system prompt for networks';
+        }
+    }
+    
+    updateElementTexts(languageCode) {
+        const translations = this.getLanguageTranslations();
         
-        document.getElementById('cancel-export').addEventListener('click', () => {
-            document.body.removeChild(modal);
-            document.head.removeChild(style);
+        // Update main header
+        const headerTitle = document.querySelector('header h1');
+        if (headerTitle) {
+            headerTitle.textContent = translations['Neural Collaborative Framework'][languageCode] || 'Neural Collaborative Framework';
+        }
+        
+        const headerDescription = document.querySelector('.description p');
+        if (headerDescription) {
+            headerDescription.textContent = translations['A collaborative framework where neural networks work together through iterative dialogue on any topic.'][languageCode] || 'A collaborative framework where neural networks work together through iterative dialogue on any topic.';
+        }
+        
+        // Update button texts
+        if (this.elements.startBtn) {
+            this.elements.startBtn.textContent = translations['Start Collaboration'][languageCode] || 'Start Collaboration';
+        }
+        if (this.elements.resetBtn) {
+            this.elements.resetBtn.textContent = translations['Reset Project'][languageCode] || 'Reset Project';
+        }
+        
+        // Update all labels
+        const labelMap = {
+            'Topic Name:': 'project-name',
+            'Topic Description:': 'project-description',
+            'Summarizer Instructions:': 'summarizer-instructions',
+            'Maximum Iterations:': 'max-iterations',
+            'Discussion rounds:': 'discussion-rounds',
+            'Interface Language:': 'interface-language',
+            'Temperature:': 'temperature',
+            'Max Tokens:': 'max-tokens',
+            'Top P:': 'top-p',
+            'Presence Penalty:': 'presence-penalty',
+            'Frequency Penalty:': 'frequency-penalty',
+            'Logit Bias:': 'logit-bias',
+            'System Prompt Template:': 'system-prompt',
+            'API Keys Configuration:': 'api-keys',
+            'Iteration Determination:': 'iteration-type'
+        };
+        
+        Object.keys(labelMap).forEach(labelText => {
+            const label = document.querySelector(`label[for="${labelMap[labelText]}"]`);
+            if (label && translations[labelText] && translations[labelText][languageCode]) {
+                label.textContent = translations[labelText][languageCode];
+            }
         });
     }
 
-    showWarningModal() {
-        const modal = document.createElement('div');
-        modal.className = 'warning-modal';
-        modal.innerHTML = `
-            <div class="warning-modal-content">
-                <h3>⚠️ Warning: Unrestricted Mode</h3>
-                <p>You have enabled Unrestricted Mode. This mode removes content filtering and safety guardrails.</p>
-                <p>Please note:</p>
-                <ul>
-                    <li>The AI will not refuse any prompts or topics</li>
-                    <li>Responses will not include safety warnings or disclaimers</li>
-                    <li>This mode is intended for research and educational purposes</li>
-                    <li>You assume all responsibility for content generated</li>
-                </ul>
-                <div class="modal-buttons">
-                    <button id="acknowledge-warning" class="btn">I Understand</button>
+    updateSelectOptions(languageCode) {
+        const translations = this.getLanguageTranslations();
+        
+        // Update iteration type options
+        const iterationType = document.getElementById('iteration-type');
+        if (iterationType) {
+            const options = iterationType.querySelectorAll('option');
+            options[0].textContent = translations['Automatic (Standard)'][languageCode] || 'Automatic (Standard)';
+            options[1].textContent = translations['Custom Cycle Definition'][languageCode] || 'Custom Cycle Definition';
+        }
+    }
+    
+    updateNetworkLabels(languageCode) {
+        const translations = this.getLanguageTranslations();
+        
+        // Update network status names
+        const networkNames = {
+            'Analytical Network': '#network1-status .status-name',
+            'Creative Network': '#network2-status .status-name',
+            'Implementation Network': '#network3-status .status-name',
+            'Data Science Network': '#network4-status .status-name',
+            'Ethical Network': '#network5-status .status-name',
+            'User Experience Network': '#network6-status .status-name',
+            'Systems Thinking Network': '#network7-status .status-name',
+            'Devil\'s Advocate Network': '#network8-status .status-name',
+            'Synthesizer Network': '#summarizer-status .status-name'
+        };
+        
+        Object.keys(networkNames).forEach(networkName => {
+            const element = document.querySelector(networkNames[networkName]);
+            if (element && translations[networkName]) {
+                element.textContent = translations[networkName][languageCode] || networkName;
+            }
+        });
+    }
+    
+    updateCheckboxLabels(languageCode) {
+        const translations = this.getLanguageTranslations();
+        
+        const checkboxLabels = {
+            'Enable Infinite Discussion Mode': 'infinite-mode',
+            'Enable Analytical Network (Network 1)': 'use-network1',
+            'Enable Creative Network (Network 2)': 'use-network2',
+            'Enable Third Network (Implementation Network)': 'use-network3',
+            'Enable Fourth Network (Data Science Network)': 'use-network4',
+            'Enable Fifth Network (Ethical Network)': 'use-network5',
+            'Enable Sixth Network (User Experience Network)': 'use-network6',
+            'Enable Seventh Network (Systems Thinking Network)': 'use-network7',
+            'Enable Eighth Network (Devil\'s Advocate Network)': 'use-network8',
+            'Enable Initiative Mode': 'initiative-enabled',
+            'Enable Fragmented Messages': 'fragmented-messages-enabled'
+        };
+        
+        Object.keys(checkboxLabels).forEach(labelText => {
+            const checkbox = document.getElementById(checkboxLabels[labelText]);
+            if (checkbox) {
+                const label = checkbox.closest('.checkbox-label');
+                if (label && translations[labelText]) {
+                    const textNode = Array.from(label.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+                    if (textNode) {
+                        textNode.textContent = translations[labelText][languageCode] || labelText;
+                    }
+                }
+            }
+        });
+    }
+
+    getLanguageTranslations() {
+        return {
+            'Neural Collaborative Framework': {
+                'ru': 'Нейронная Коллаборативная Платформа',
+                'es': 'Marco de Colaboración Neural',
+                'fr': 'Cadre de Collaboration Neuronale',
+                'de': 'Neuronales Kollaborations-Framework',
+                'zh': '神经协作框架',
+                'ja': 'ニューラル協調フレームワーク',
+                'ko': '신경망 협업 프레임워크',
+                'ar': 'إطار التعاون العصبي',
+                'hi': 'न्यूरल सहयोग फ्रेमवर्क'
+            },
+            'A collaborative framework where neural networks work together through iterative dialogue on any topic.': {
+                'ru': 'Платформа для совместной работы нейронных сетей через итеративный диалог по любой теме.',
+                'es': 'Un marco colaborativo donde las redes neuronales trabajan juntas a través del diálogo iterativo sobre cualquier tema.',
+                'fr': 'Un cadre collaboratif où les réseaux de neurones travaillent ensemble par le dialogue itératif sur n\'importe quel sujet.',
+                'de': 'Ein kollaboratives Framework, in dem neuronale Netzwerke durch iterativen Dialog zu jedem Thema zusammenarbeiten.',
+                'zh': '一个协作框架，神经网络通过迭代对话在任何主题上协同工作。',
+                'ja': 'ニューラルネットワークがあらゆるトピックについて反復対話を通じて協力するコラボレーションフレームワーク。',
+                'ko': '신경망이 모든 주제에 대해 반복적 대화를 통해 협력하는 협업 프레임워크입니다.',
+                'ar': 'إطار تعاوني حيث تعمل الشبكات العصبية معًا من خلال الحوار التكراري حول أي موضوع.',
+                'hi': 'एक सहयोगी फ्रेमवर्क जहाँ न्यूरल नेटवर्क किसी भी विषय पर पुनरावर्ती संवाद के माध्यम से मिलकर काम करते हैं।'
+            },
+            'Start Collaboration': {
+                'ru': 'Начать сотрудничество',
+                'es': 'Iniciar colaboración',
+                'fr': 'Démarrer la collaboration',
+                'de': 'Zusammenarbeit starten',
+                'zh': '开始协作',
+                'ja': 'コラボレーション開始',
+                'ko': '협업 시작',
+                'ar': 'بدء التعاون',
+                'hi': 'सहयोग शुरू करें'
+            },
+            'Reset Project': {
+                'ru': 'Сбросить проект',
+                'es': 'Reiniciar proyecto',
+                'fr': 'Réinitialiser le projet',
+                'de': 'Projekt zurücksetzen',
+                'zh': '重置项目',
+                'ja': 'プロジェクトリセット',
+                'ko': '프로젝트 재설정',
+                'ar': 'إعادة تعيين المشروع',
+                'hi': 'प्रोजेक्ट रीसेट करें'
+            },
+            'Topic Name:': {
+                'ru': 'Название темы:',
+                'es': 'Nombre del tema:',
+                'fr': 'Nom du sujet :',
+                'de': 'Themenname:',
+                'zh': '主题名称：',
+                'ja': 'トピック名：',
+                'ko': '주제 이름:',
+                'ar': 'اسم الموضوع:',
+                'hi': 'विषय नाम:'
+            },
+            'Topic Description:': {
+                'ru': 'Описание темы:',
+                'es': 'Descripción del tema:',
+                'fr': 'Description du sujet :',
+                'de': 'Themenbeschreibung:',
+                'zh': '主题描述：',
+                'ja': 'トピック説明：',
+                'ko': '주제 설명:',
+                'ar': 'وصف الموضوع:',
+                'hi': 'विषय विवरण:'
+            },
+            'Enter topic name': {
+                'ru': 'Введите название темы',
+                'es': 'Ingrese el nombre del tema',
+                'fr': 'Saisissez le nom du sujet',
+                'de': 'Themenname eingeben',
+                'zh': '输入主题名称',
+                'ja': 'トピック名を入力',
+                'ko': '주제 이름 입력',
+                'ar': 'أدخل اسم الموضوع',
+                'hi': 'विषय नाम दर्ज करें'
+            },
+            'Describe the topic you want to explore': {
+                'ru': 'Опишите тему, которую хотите исследовать',
+                'es': 'Describe el tema que quieres explorar',
+                'fr': 'Décrivez le sujet que vous voulez explorer',
+                'de': 'Beschreiben Sie das Thema, das Sie erkunden möchten',
+                'zh': '描述您想要探索的主题',
+                'ja': '探索したいトピックを説明してください',
+                'ko': '탐색하고 싶은 주제를 설명하세요',
+                'ar': 'صف الموضوع الذي تريد استكشافه',
+                'hi': 'उस विषय का वर्णन करें जिसे आप एक्सप्लोर करना चाहते हैं'
+            },
+            'Custom instructions for the Synthesizer Network (optional)': {
+                'ru': 'Пользовательские инструкции для Сети синтезатора (необязательно)',
+                'es': 'Instrucciones personalizadas para la Red Sintetizadora (opcional)',
+                'fr': 'Instructions personnalisées pour le Réseau Synthétiseur (optionnel)',
+                'de': 'Benutzerdefinierte Anweisungen für das Synthesizer-Netzwerk (optional)',
+                'zh': '综合网络的自定义指令（可选）',
+                'ja': 'シンセサイザーネットワークのカスタム指示（オプション）',
+                'ko': '합성 네트워크를 위한 사용자 지정 지침 (선택사항)',
+                'ar': 'تعليمات مخصصة لشبكة المركب (اختياري)',
+                'hi': 'सिंथेसाइज़र नेटवर्क के लिए कस्टम निर्देश (वैकल्पिक)'
+            },
+            'Customize the system prompt for networks': {
+                'ru': 'Настройте системный промпт для сетей',
+                'es': 'Personalizar el prompt del sistema para redes',
+                'fr': 'Personnaliser l\'invite système pour les réseaux',
+                'de': 'System-Prompt für Netzwerke anpassen',
+                'zh': '为网络自定义系统提示',
+                'ja': 'ネットワークのシステムプロンプトをカスタマイズ',
+                'ko': '네트워크용 시스템 프롬프트 사용자 정의',
+                'ar': 'تخصيص موجه النظام للشبكات',
+                'hi': 'नेटवर्क के लिए सिस्टम प्रॉम्प्ट कस्टमाइज़ करें'
+            },
+            'Project Setup': {
+                'ru': 'Настройка проекта',
+                'es': 'Configuración del proyecto',
+                'fr': 'Configuration du projet',
+                'de': 'Projekt-Setup',
+                'zh': '项目设置',
+                'ja': 'プロジェクト設定',
+                'ko': '프로젝트 설정',
+                'ar': 'إعداد المشروع',
+                'hi': 'प्रोजेक्ट सेटअप'
+            },
+            'Model Settings': {
+                'ru': 'Настройки модели',
+                'es': 'Configuración del modelo',
+                'fr': 'Paramètres du modèle',
+                'de': 'Modelleinstellungen',
+                'zh': '模型设置',
+                'ja': 'モデル設定',
+                'ko': '모델 설정',
+                'ar': 'إعدادات النموذج',
+                'hi': 'मॉडल सेटिंग्स'
+            },
+            'Development Dialogue': {
+                'ru': 'Диалог разработки',
+                'es': 'Diálogo de desarrollo',
+                'fr': 'Dialogue de développement',
+                'de': 'Entwicklungsdialog',
+                'zh': '开发对话',
+                'ja': '開発対話',
+                'ko': '개발 대화',
+                'ar': 'حوار التطوير',
+                'hi': 'विकास संवाद'
+            },
+            'Development Output': {
+                'ru': 'Результат разработки',
+                'es': 'Salida de desarrollo',
+                'fr': 'Sortie de développement',
+                'de': 'Entwicklungsausgabe',
+                'zh': '开发输出',
+                'ja': '開発出力',
+                'ko': '개발 출력',
+                'ar': 'مخرجات التطوير',
+                'hi': 'विकास आउटपुट'
+            },
+            'Analytical Network': {
+                'ru': 'Аналитическая сеть',
+                'es': 'Red analítica',
+                'fr': 'Réseau analytique',
+                'de': 'Analytisches Netzwerk',
+                'zh': '分析网络',
+                'ja': '分析ネットワーク',
+                'ko': '분석 네트워크',
+                'ar': 'الشبكة التحليلية',
+                'hi': 'विश्लेषणात्मक नेटवर्क'
+            },
+            'Creative Network': {
+                'ru': 'Креативная сеть',
+                'es': 'Red creativa',
+                'fr': 'Réseau créatif',
+                'de': 'Kreatives Netzwerk',
+                'zh': '创意网络',
+                'ja': 'クリエイティブネットワーク',
+                'ko': '창의 네트워크',
+                'ar': 'الشبكة الإبداعية',
+                'hi': 'रचनात्मक नेटवर्क'
+            },
+            'Implementation Network': {
+                'ru': 'Сеть реализации',
+                'es': 'Red de implementación',
+                'fr': 'Réseau d\'implémentation',
+                'de': 'Implementierungsnetzwerk',
+                'zh': '实施网络',
+                'ja': '実装ネットワーク',
+                'ko': '구현 네트워크',
+                'ar': 'شبكة التنفيذ',
+                'hi': 'कार्यान्वयन नेटवर्क'
+            },
+            'Data Science Network': {
+                'ru': 'Сеть науки о данных',
+                'es': 'Red de ciencia de datos',
+                'fr': 'Réseau de science des données',
+                'de': 'Data Science Netzwerk',
+                'zh': '数据科学网络',
+                'ja': 'データサイエンスネットワーク',
+                'ko': '데이터 사이언스 네트워크',
+                'ar': 'شبكة علوم البيانات',
+                'hi': 'डेटा साइंस नेटवर्क'
+            },
+            'Ethical Network': {
+                'ru': 'Этическая сеть',
+                'es': 'Red ética',
+                'fr': 'Réseau éthique',
+                'de': 'Ethisches Netzwerk',
+                'zh': '伦理网络',
+                'ja': '倫理ネットワーク',
+                'ko': '윤리 네트워크',
+                'ar': 'الشبكة الأخلاقية',
+                'hi': 'नैतिक नेटवर्क'
+            },
+            'User Experience Network': {
+                'ru': 'Сеть пользовательского опыта',
+                'es': 'Red de experiencia de usuario',
+                'fr': 'Réseau d\'expérience utilisateur',
+                'de': 'Benutzererfahrungs-Netzwerk',
+                'zh': '用户体验网络',
+                'ja': 'ユーザーエクスペリエンスネットワーク',
+                'ko': '사용자 경험 네트워크',
+                'ar': 'شبكة تجربة المستخدم',
+                'hi': 'उपयोगकर्ता अनुभव नेटवर्क'
+            },
+            'Systems Thinking Network': {
+                'ru': 'Сеть системного мышления',
+                'es': 'Red de pensamiento sistémico',
+                'fr': 'Réseau de pensée systémique',
+                'de': 'Systemdenken-Netzwerk',
+                'zh': '系统思维网络',
+                'ja': 'システム思考ネットワーク',
+                'ko': '시스템 사고 네트워크',
+                'ar': 'شبكة التفكير النظمي',
+                'hi': 'सिस्टम थिंकिंग नेटवर्क'
+            },
+            'Devil\'s Advocate Network': {
+                'ru': 'Сеть адвоката дьявола',
+                'es': 'Red del abogado del diablo',
+                'fr': 'Réseau de l\'avocat du diable',
+                'de': 'Teufelsanwalt-Netzwerk',
+                'zh': '反对者网络',
+                'ja': '悪魔の代弁者ネットワーク',
+                'ko': '반대 논리 네트워크',
+                'ar': 'شبكة محامي الشيطان',
+                'hi': 'शैतान के वकील नेटवर्क'
+            },
+            'Synthesizer Network': {
+                'ru': 'Сеть синтезатора',
+                'es': 'Red sintetizadora',
+                'fr': 'Réseau synthétiseur',
+                'de': 'Synthesizer-Netzwerk',
+                'zh': '综合网络',
+                'ja': 'シンセサイザーネットワーク',
+                'ko': '합성 네트워크',
+                'ar': 'شبكة المركب',
+                'hi': 'सिंथेसाइज़र नेटवर्क'
+            },
+            'Enable Infinite Discussion Mode': {
+                'ru': 'Включить режим бесконечного обсуждения',
+                'es': 'Habilitar modo de discusión infinita',
+                'fr': 'Activer le mode de discussion infinie',
+                'de': 'Unendlichen Diskussionsmodus aktivieren',
+                'zh': '启用无限讨论模式',
+                'ja': '無限ディスカッションモードを有効にする',
+                'ko': '무한 토론 모드 활성화',
+                'ar': 'تفعيل وضع النقاش اللانهائي',
+                'hi': 'अनंत चर्चा मोड सक्षम करें'
+            },
+            'Enable Initiative Mode': {
+                'ru': 'Включить режим инициативы',
+                'es': 'Habilitar modo de iniciativa',
+                'fr': 'Activer le mode initiative',
+                'de': 'Initiativ-Modus aktivieren',
+                'zh': '启用主动模式',
+                'ja': 'イニシアチブモードを有効にする',
+                'ko': '주도권 모드 활성화',
+                'ar': 'تفعيل وضع المبادرة',
+                'hi': 'पहल मोड सक्षम करें'
+            },
+            'Enable Fragmented Messages': {
+                'ru': 'Включить фрагментированные сообщения',
+                'es': 'Habilitar mensajes fragmentados',
+                'fr': 'Activer les messages fragmentés',
+                'de': 'Fragmentierte Nachrichten aktivieren',
+                'zh': '启用分段消息',
+                'ja': '断片化されたメッセージを有効にする',
+                'ko': '분할 메시지 활성화',
+                'ar': 'تفعيل الرسائل المجزأة',
+                'hi': 'खंडित संदेश सक्षम करें'
+            },
+            'Custom instructions for the Synthesizer Network (optional)': {
+                'ru': 'Пользовательские инструкции для Сети синтезатора (необязательно)',
+                'es': 'Instrucciones personalizadas para la Red Sintetizadora (opcional)',
+                'fr': 'Instructions personnalisées pour le Réseau Synthétiseur (optionnel)',
+                'de': 'Benutzerdefinierte Anweisungen für das Synthesizer-Netzwerk (optional)',
+                'zh': '综合网络的自定义指令（可选）',
+                'ja': 'シンセサイザーネットワークのカスタム指示（オプション）',
+                'ko': '합성 네트워크를 위한 사용자 지정 지침 (선택사항)',
+                'ar': 'تعليمات مخصصة لشبكة المركب (اختياري)',
+                'hi': 'सिंथेसाइज़र नेटवर्क के लिए कस्टम निर्देश (वैकल्पिक)'
+            },
+            'Customize the system prompt for networks': {
+                'ru': 'Настройте системный промпт для сетей',
+                'es': 'Personalizar el prompt del sistema para redes',
+                'fr': 'Personnaliser l\'invite système pour les réseaux',
+                'de': 'System-Prompt für Netzwerke anpassen',
+                'zh': '为网络自定义系统提示',
+                'ja': 'ネットワークのシステムプロンプトをカスタマイズ',
+                'ko': '네트워크용 시스템 프롬프트 사용자 정의',
+                'ar': 'تخصيص موجه النظام للشبكات',
+                'hi': 'नेटवर्क के लिए सिस्टम प्रॉम्प्ट कस्टमाइज़ करें'
+            },
+            'Maximum Iterations:': {
+                'ru': 'Максимальные итерации:',
+                'es': 'Iteraciones máximas:',
+                'fr': 'Itérations maximales :',
+                'de': 'Maximale Iterationen:',
+                'zh': '最大迭代次数：',
+                'ja': '最大反復回数：',
+                'ko': '최대 반복 횟수:',
+                'ar': 'التكرارات القصوى:',
+                'hi': 'अधिकतम पुनरावृत्तियाँ:'
+            },
+            'Discussion rounds:': {
+                'ru': 'Раунды обсуждения:',
+                'es': 'Rondas de discusión:',
+                'fr': 'Tours de discussion :',
+                'de': 'Diskussionsrunden:',
+                'zh': '讨论轮次：',
+                'ja': 'ディスカッションラウンド：',
+                'ko': '토론 라운드:',
+                'ar': 'جولات النقاش:',
+                'hi': 'चर्चा के दौर:'
+            },
+            'Interface Language:': {
+                'ru': 'Язык интерфейса:',
+                'es': 'Idioma de la interfaz:',
+                'fr': 'Langue de l\'interface :',
+                'de': 'Sprache der Benutzeroberfläche:',
+                'zh': '界面语言：',
+                'ja': 'インターフェース言語：',
+                'ko': '인터페이스 언어:',
+                'ar': 'لغة الواجهة:',
+                'hi': 'इंटरफ़ेस भाषा:'
+            },
+            'Temperature:': {
+                'ru': 'Температура:',
+                'es': 'Temperatura:',
+                'fr': 'Température :',
+                'de': 'Temperatur:',
+                'zh': '温度：',
+                'ja': '温度：',
+                'ko': '온도:',
+                'ar': 'درجة الحرارة:',
+                'hi': 'तापमान:'
+            },
+            'Max Tokens:': {
+                'ru': 'Макс. токены:',
+                'es': 'Tokens máximos:',
+                'fr': 'Tokens max :',
+                'de': 'Max. Token:',
+                'zh': '最大令牌：',
+                'ja': '最大トークン：',
+                'ko': '최대 토큰:',
+                'ar': 'الحد الأقصى للرموز:',
+                'hi': 'अधिकतम टोकन:'
+            },
+            'Automatic (Standard)': {
+                'ru': 'Автоматический (Стандартный)',
+                'es': 'Automático (Estándar)',
+                'fr': 'Automatique (Standard)',
+                'de': 'Automatisch (Standard)',
+                'zh': '自动（标准）',
+                'ja': '自動（標準）',
+                'ko': '자동 (표준)',
+                'ar': 'تلقائي (قياسي)',
+                'hi': 'स्वचालित (मानक)'
+            },
+            'Custom Cycle Definition': {
+                'ru': 'Пользовательское определение цикла',
+                'es': 'Definición de ciclo personalizada',
+                'fr': 'Définition de cycle personnalisée',
+                'de': 'Benutzerdefinierte Zyklusdefinition',
+                'zh': '自定义周期定义',
+                'ja': 'カスタムサイクル定義',
+                'ko': '사용자 정의 사이클 정의',
+                'ar': 'تعريف دورة مخصص',
+                'hi': 'कस्टम चक्र परिभाषा'
+            }
+        };
+    }
+
+    createStreamInterface() {
+        // Create stream interface container (initially hidden)
+        const streamContainer = document.createElement('div');
+        streamContainer.id = 'stream-interface';
+        streamContainer.className = 'stream-interface hidden';
+        streamContainer.innerHTML = `
+            <div class="stream-header">
+                <h3>Event-Driven Discussion</h3>
+                <div class="mode-toggle">
+                    <button id="mode-iterative" class="mode-btn">Iterative</button>
+                    <button id="mode-event-driven" class="mode-btn active">Event-Driven</button>
+                </div>
+                <div class="stream-controls">
+                    <button id="pause-stream" class="btn btn-secondary">Pause</button>
+                    <button id="resume-stream" class="btn">Resume</button>
+                </div>
+            </div>
+            
+            <div class="stream-content">
+                <div class="message-stream" id="message-stream">
+                    <!-- Messages will be added here -->
+                </div>
+                
+                <div class="model-status-panel">
+                    <h4>Model Status</h4>
+                    <div id="model-status-list" class="model-status-list">
+                        <!-- Model statuses will be added here -->
+                    </div>
+                </div>
+            </div>
+            
+            <div class="stream-input">
+                <div class="manual-input">
+                    <select id="manual-model-select">
+                        <option value="">Select model to respond...</option>
+                    </select>
+                    <input type="text" id="parent-message-id" placeholder="Reply to message ID (optional)">
+                    <button id="trigger-manual-response" class="btn">Trigger Response</button>
+                </div>
+            </div>
+            
+            <div class="summaries-tab hidden" id="summaries-tab">
+                <h3>Discussion Summaries</h3>
+                <div id="summaries-list" class="summaries-list">
+                    <!-- Summaries will be added here -->
                 </div>
             </div>
         `;
         
-        document.body.appendChild(modal);
+        // Add to discussion area
+        const discussionArea = document.querySelector('.discussion-area');
+        if (discussionArea) {
+            discussionArea.appendChild(streamContainer);
+        }
         
-        // Add styles for the modal
-        const style = document.createElement('style');
-        style.textContent = `
-            .warning-modal {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background-color: rgba(0,0,0,0.5);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                z-index: 1000;
-            }
-            .warning-modal-content {
-                background-color: var(--card-bg);
-                padding: 30px;
-                border-radius: 15px;
-                max-width: 500px;
-                width: 90%;
-                box-shadow: var(--shadow);
-                border-top: 5px solid #ffbe0b;
-            }
-            .warning-modal-content h3 {
-                color: #ffbe0b;
-            }
-            .warning-modal-content ul {
-                margin-left: 20px;
-                margin-bottom: 20px;
-            }
-        `;
-        document.head.appendChild(style);
+        this.streamElements = {
+            container: streamContainer,
+            messageStream: streamContainer.querySelector('#message-stream'),
+            modelStatusList: streamContainer.querySelector('#model-status-list'),
+            manualModelSelect: streamContainer.querySelector('#manual-model-select'),
+            parentMessageId: streamContainer.querySelector('#parent-message-id'),
+            triggerManualResponse: streamContainer.querySelector('#trigger-manual-response'),
+            summariesTab: streamContainer.querySelector('#summaries-tab'),
+            summariesList: streamContainer.querySelector('#summaries-list'),
+            modeIterative: streamContainer.querySelector('#mode-iterative'),
+            modeEventDriven: streamContainer.querySelector('#mode-event-driven'),
+            pauseStream: streamContainer.querySelector('#pause-stream'),
+            resumeStream: streamContainer.querySelector('#resume-stream')
+        };
         
-        document.getElementById('acknowledge-warning').addEventListener('click', () => {
-            document.body.removeChild(modal);
-            document.head.removeChild(style);
+        this.setupStreamEventListeners();
+    }
+    
+    setupStreamEventListeners() {
+        this.streamElements.modeIterative.addEventListener('click', () => {
+            if (window.neuralFramework) {
+                window.neuralFramework.setMode('iterative');
+            }
         });
+        
+        this.streamElements.modeEventDriven.addEventListener('click', () => {
+            if (window.neuralFramework) {
+                window.neuralFramework.setMode('event_driven');
+            }
+        });
+        
+        this.streamElements.triggerManualResponse.addEventListener('click', () => {
+            const modelId = this.streamElements.manualModelSelect.value;
+            const parentId = this.streamElements.parentMessageId.value.trim() || null;
+            
+            if (modelId && window.neuralFramework) {
+                window.neuralFramework.dialogueManager.requestInitiative(modelId, parentId);
+            }
+        });
+        
+        this.streamElements.pauseStream.addEventListener('click', () => {
+            if (window.neuralFramework) {
+                window.neuralFramework.dialogueManager.stop();
+            }
+        });
+        
+        this.streamElements.resumeStream.addEventListener('click', () => {
+            if (window.neuralFramework) {
+                window.neuralFramework.dialogueManager.start();
+            }
+        });
+    }
+    
+    showStreamInterface() {
+        this.streamElements.container.classList.remove('hidden');
+        document.querySelector('.chat-container').classList.add('hidden');
+        
+        // Populate model select
+        const select = this.streamElements.manualModelSelect;
+        select.innerHTML = '<option value="">Select model to respond...</option>';
+        
+        if (window.neuralFramework) {
+            const networkIds = window.neuralFramework.networkManager.getNetworkIds();
+            networkIds.forEach(id => {
+                const option = document.createElement('option');
+                option.value = id;
+                option.textContent = window.neuralFramework.networkManager.networks[id].name;
+                select.appendChild(option);
+            });
+        }
+    }
+    
+    hideStreamInterface() {
+        this.streamElements.container.classList.add('hidden');
+        document.querySelector('.chat-container').classList.remove('hidden');
+    }
+    
+    updateModeInterface(mode) {
+        if (mode === 'event_driven') {
+            this.showStreamInterface();
+            this.streamElements.modeEventDriven.classList.add('active');
+            this.streamElements.modeIterative.classList.remove('active');
+        } else {
+            this.hideStreamInterface();
+            this.streamElements.modeIterative.classList.add('active');
+            this.streamElements.modeEventDriven.classList.remove('active');
+        }
+    }
+    
+    addStreamMessage(message) {
+        const messageEl = document.createElement('div');
+        messageEl.className = `stream-message ${message.authorId}`;
+        messageEl.dataset.messageId = message.id;
+        
+        const authorName = message.authorId === 'system' ? 'System' : 
+                          (window.neuralFramework?.networkManager.networks[message.authorId]?.name || message.authorId);
+        
+        const timestamp = new Date(message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        
+        messageEl.innerHTML = `
+            <div class="message-header">
+                <span class="message-author">${authorName}</span>
+                <span class="message-timestamp">${timestamp}</span>
+                <span class="message-id">#${message.id.slice(-6)}</span>
+                ${message.parentId ? `<span class="reply-to">↳ ${message.parentId.slice(-6)}</span>` : ''}
+            </div>
+            <div class="message-content">${message.content}</div>
+            <div class="message-actions">
+                <button class="reply-btn" data-message-id="${message.id}">Reply</button>
+            </div>
+        `;
+        
+        // Add indentation for replies
+        if (message.parentId) {
+            messageEl.style.marginLeft = '20px';
+            messageEl.classList.add('reply-message');
+        }
+        
+        this.streamElements.messageStream.appendChild(messageEl);
+        this.streamElements.messageStream.scrollTop = this.streamElements.messageStream.scrollHeight;
+        
+        // Add event listener for reply button
+        const replyBtn = messageEl.querySelector('.reply-btn');
+        replyBtn.addEventListener('click', () => {
+            this.streamElements.parentMessageId.value = message.id;
+        });
+        
+        // If it's a summary, also add to summaries tab
+        if (message.isSummary) {
+            this.addToSummariesTab(message);
+        }
+    }
+    
+    updateModelPriorities(models) {
+        const statusList = this.streamElements.modelStatusList;
+        statusList.innerHTML = '';
+        
+        models.forEach(([modelId, model]) => {
+            if (modelId === 'summarizer') return;
+            
+            const statusEl = document.createElement('div');
+            statusEl.className = 'model-status-item';
+            
+            const networkName = window.neuralFramework?.networkManager.networks[modelId]?.name || modelId;
+            const priorityColor = this.getPriorityColor(model.priorityScore);
+            const statusText = model.isActive ? 'Generating...' : 
+                              model.priorityScore >= 1.0 ? 'Ready' : 'Waiting';
+            
+            statusEl.innerHTML = `
+                <div class="model-name">${networkName}</div>
+                <div class="model-priority" style="color: ${priorityColor}">
+                    Priority: ${model.priorityScore.toFixed(2)}
+                </div>
+                <div class="model-status">${statusText}</div>
+                <div class="model-stats">
+                    Unseen: ${model.unseenCount} | 
+                    Last: ${model.lastMessageTime ? new Date(model.lastMessageTime).toLocaleTimeString() : 'Never'}
+                </div>
+            `;
+            
+            statusList.appendChild(statusEl);
+        });
+    }
+    
+    getPriorityColor(score) {
+        if (score >= 2.0) return '#e63946';
+        if (score >= 1.0) return '#ff9e00';
+        if (score >= 0.5) return '#ffd166';
+        return '#6c757d';
+    }
+    
+    addToSummariesTab(summaryMessage) {
+        const summaryEl = document.createElement('div');
+        summaryEl.className = 'summary-item';
+        summaryEl.innerHTML = `
+            <div class="summary-header">
+                <span class="summary-timestamp">${new Date(summaryMessage.timestamp).toLocaleString()}</span>
+                <span class="summary-id">#${summaryMessage.id.slice(-6)}</span>
+            </div>
+            <div class="summary-content">${summaryMessage.content}</div>
+        `;
+        
+        this.streamElements.summariesList.appendChild(summaryEl);
     }
 
     createHistoryUI(savedDiscussions) {
@@ -1864,5 +2681,153 @@ export class UIManager {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }, 100);
+    }
+
+    showExportOptions() {
+        const modal = document.createElement('div');
+        modal.className = 'export-modal';
+        modal.innerHTML = `
+            <div class="export-modal-content">
+                <h3>Export Discussion</h3>
+                <p>Choose a format to export the current discussion:</p>
+                <div class="export-options">
+                    <button class="export-option" data-format="json">JSON Format</button>
+                    <button class="export-option" data-format="text">Plain Text</button>
+                    <button class="export-option" data-format="html">HTML Document</button>
+                </div>
+                <div class="modal-buttons">
+                    <button id="cancel-export" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Add styles for the modal
+        const style = document.createElement('style');
+        style.textContent = `
+            .export-modal {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0,0,0,0.5);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+            }
+            .export-modal-content {
+                background-color: var(--card-bg);
+                padding: 30px;
+                border-radius: 15px;
+                max-width: 500px;
+                width: 90%;
+                box-shadow: var(--shadow);
+            }
+            .export-options {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 15px;
+                margin: 20px 0;
+            }
+            .export-option {
+                flex: 1;
+                min-width: 120px;
+                padding: 15px;
+                background-color: var(--primary-color);
+                color: white;
+                border: none;
+                border-radius: 10px;
+                cursor: pointer;
+                font-weight: 500;
+                transition: all 0.3s ease;
+            }
+            .export-option:hover {
+                transform: translateY(-3px);
+                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // Add event listeners
+        document.querySelectorAll('.export-option').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const format = btn.dataset.format;
+                if (window.neuralFramework) {
+                    window.neuralFramework.exportDiscussion(format);
+                }
+                document.body.removeChild(modal);
+                document.head.removeChild(style);
+            });
+        });
+        
+        document.getElementById('cancel-export').addEventListener('click', () => {
+            document.body.removeChild(modal);
+            document.head.removeChild(style);
+        });
+    }
+
+    showWarningModal() {
+        const modal = document.createElement('div');
+        modal.className = 'warning-modal';
+        modal.innerHTML = `
+            <div class="warning-modal-content">
+                <h3>⚠️ Warning: Unrestricted Mode</h3>
+                <p>You have enabled Unrestricted Mode. This mode removes content filtering and safety guardrails.</p>
+                <p>Please note:</p>
+                <ul>
+                    <li>The AI will not refuse any prompts or topics</li>
+                    <li>Responses will not include safety warnings or disclaimers</li>
+                    <li>This mode is intended for research and educational purposes</li>
+                    <li>You assume all responsibility for content generated</li>
+                </ul>
+                <div class="modal-buttons">
+                    <button id="acknowledge-warning" class="btn">I Understand</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Add styles for the modal
+        const style = document.createElement('style');
+        style.textContent = `
+            .warning-modal {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0,0,0,0.5);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+            }
+            .warning-modal-content {
+                background-color: var(--card-bg);
+                padding: 30px;
+                border-radius: 15px;
+                max-width: 500px;
+                width: 90%;
+                box-shadow: var(--shadow);
+                border-top: 5px solid #ffbe0b;
+            }
+            .warning-modal-content h3 {
+                color: #ffbe0b;
+            }
+            .warning-modal-content ul {
+                margin-left: 20px;
+                margin-bottom: 20px;
+            }
+        `;
+        document.head.appendChild(style);
+        
+        document.getElementById('acknowledge-warning').addEventListener('click', () => {
+            document.body.removeChild(modal);
+            document.head.removeChild(style);
+        });
     }
 }

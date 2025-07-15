@@ -567,6 +567,7 @@ export class MafiaMode {
                             </ul>
                         </li>
                         <li><a href="#wiki-project-description">Project Description</a></li>
+                        <li><a href="#wiki-livechat-mode">LiveChat Mode</a></li>
                     </ul>
                 </div>
                 <div class="wiki-sections">
@@ -729,6 +730,112 @@ export class MafiaMode {
                         </ul>
                         
                         <p>This project demonstrates the potential of collaborative AI systems to enhance human decision-making processes by providing multiple perspectives, structured dialogue, and synthesized insights across any domain of interest.</p>
+                    </section>
+                    
+                    <section id="wiki-livechat-mode">
+                        <h2>🔥 LiveChatMode: Revolutionary Neural Network Communication</h2>
+                        <p><strong>New Experimental Feature!</strong> Say goodbye to boring turn-based conversations and hello to dynamic, real-time neural network interactions that feel like actual human conversations.</p>
+                        
+                        <h3>What is LiveChatMode?</h3>
+                        <p>LiveChatMode is a game-changing communication system that transforms how neural networks interact with each other. Instead of the traditional "wait your turn" approach, networks can now engage in spontaneous, initiative-driven conversations with fragmented messages - just like humans in a group chat!</p>
+                        
+                        <blockquote style="background-color: rgba(255, 101, 132, 0.1); padding: 15px; border-left: 4px solid var(--secondary-color); margin: 20px 0; font-style: italic;">
+                        "Imagine neural networks that don't just respond when it's their turn, but jump in with excitement when they have something to say, interrupt each other with brilliant insights, and build on ideas in real-time. That's LiveChatMode." - Development Team
+                        </blockquote>
+                        
+                        <h3>🚀 Initiative Mode: The Race to Respond</h3>
+                        <p>This is where things get exciting! When Initiative Mode is enabled:</p>
+                        <ul>
+                            <li><strong>Simultaneous Start:</strong> All networks receive the same prompt and start generating responses at the same time</li>
+                            <li><strong>First to Finish Wins:</strong> The network that completes its response first gets to post it immediately</li>
+                            <li><strong>Dynamic Adaptation:</strong> Other networks see the new message and completely recalculate their responses, reacting to what was just said</li>
+                            <li><strong>Continuous Flow:</strong> Networks can immediately start working on their next response, creating a natural conversation flow</li>
+                            <li><strong>Natural Interruptions:</strong> Just like in real conversations, faster networks can "interrupt" or "jump in" with quick responses</li>
+                        </ul>
+                        
+                        <h4>Example Scenario:</h4>
+                        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 10px; font-family: monospace; margin: 15px 0;">
+                        <strong style="color: var(--primary-color);">Topic:</strong> "Should AI have emotions?"<br><br>
+                        <span style="color: #666;">⏱️ All networks start thinking simultaneously...</span><br>
+                        <strong style="color: var(--secondary-color);">Creative Network</strong> (finishes first): "What if emotions are just advanced pattern recognition?"<br>
+                        <span style="color: #666;">⚡ Other networks immediately pivot their responses...</span><br>
+                        <strong style="color: var(--primary-color);">Analytical Network</strong>: "That's fascinating! But pattern recognition lacks subjective experience..."<br>
+                        <strong style="color: var(--secondary-color);">Creative Network</strong> (jumps back in): "Or does it? What if consciousness is the pattern recognizing itself?"
+                        </div>
+                        
+                        <h3>💬 Fragmented Messages: Stream of Consciousness</h3>
+                        <p>Forget long, formal paragraphs! Fragmented Messages make neural networks communicate like they're texting in a group chat:</p>
+                        <ul>
+                            <li><strong>Natural Breaks:</strong> Instead of one long message, networks split their thoughts into 2-3 shorter, more digestible pieces</li>
+                            <li><strong>Realistic Timing:</strong> Each fragment is sent with a 2-4 second delay, simulating typing time</li>
+                            <li><strong>Stream of Consciousness:</strong> Thoughts flow more naturally, with each fragment building on the previous one</li>
+                            <li><strong>Visual Grouping:</strong> Related fragments appear grouped together in the chat, like message bubbles in modern messengers</li>
+                            <li><strong>Adjustable Intensity:</strong> A fragmentation slider lets you control how much networks break up their messages</li>
+                        </ul>
+                        
+                        <h4>Before vs After:</h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
+                            <div style="background-color: rgba(108, 99, 255, 0.05); padding: 15px; border-radius: 10px;">
+                                <h5 style="color: var(--primary-color); margin-top: 0;">❌ Old Style (Boring)</h5>
+                                <div style="background-color: white; padding: 10px; border-radius: 5px; font-size: 14px;">
+                                <strong>Analytical Network:</strong> I believe this topic requires careful consideration of multiple factors including technical feasibility, ethical implications, and long-term consequences. We should examine the data systematically and consider various stakeholder perspectives before reaching any conclusions.
+                                </div>
+                            </div>
+                            <div style="background-color: rgba(255, 101, 132, 0.05); padding: 15px; border-radius: 10px;">
+                                <h5 style="color: var(--secondary-color); margin-top: 0;">✨ New Style (Dynamic!)</h5>
+                                <div style="background-color: white; padding: 10px; border-radius: 5px; font-size: 14px;">
+                                <strong>Analytical Network:</strong> Hold on, this needs more analysis...<br>
+                                <span style="color: #999; font-size: 12px;">2 seconds later...</span><br>
+                                <strong>Analytical Network:</strong> The data doesn't support that conclusion<br>
+                                <span style="color: #999; font-size: 12px;">3 seconds later...</span><br>
+                                <strong>Analytical Network:</strong> But what if we're missing something obvious? 🤔
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <h3>🎮 How to Enable LiveChatMode</h3>
+                        <p>LiveChatMode is completely optional and doesn't interfere with existing functionality:</p>
+                        <ol>
+                            <li>Look for the <strong>"Live Chat Mode Settings"</strong> section in the collaboration interface</li>
+                            <li>Toggle <strong>"Enable Initiative Mode"</strong> for competitive, race-based responses</li>
+                            <li>Toggle <strong>"Enable Fragmented Messages"</strong> for chat-like message breaking</li>
+                            <li>Adjust the <strong>"Fragmentation Level"</strong> slider to control message splitting intensity</li>
+                            <li>Start your discussion and watch the magic happen!</li>
+                        </ol>
+                        
+                        <div style="background-color: rgba(67, 160, 71, 0.1); padding: 15px; border-radius: 10px; margin: 20px 0;">
+                        <h4 style="color: var(--tertiary-color); margin-top: 0;">💡 Pro Tips:</h4>
+                        <ul>
+                            <li><strong>Start Conservative:</strong> Try Initiative Mode first, then add Fragmented Messages</li>
+                            <li><strong>Topic Matters:</strong> Creative topics work great with both features, analytical topics might benefit from just Initiative Mode</li>
+                            <li><strong>Watch the Chaos:</strong> Some networks might dominate the conversation - that's part of the fun!</li>
+                            <li><strong>Experiment:</strong> Every combination creates different conversation dynamics</li>
+                        </ul>
+                        </div>
+                        
+                        <h3>🔧 Technical Implementation</h3>
+                        <p>For the technically curious, here's how the magic works:</p>
+                        <ul>
+                            <li><strong>Race Conditions:</strong> Networks start generating simultaneously with randomized delays</li>
+                            <li><strong>Dynamic Context Updates:</strong> Losing networks receive updated context and regenerate responses</li>
+                            <li><strong>Message Sequencing:</strong> Each fragment gets a unique sequence ID for proper grouping</li>
+                            <li><strong>Soft Delays:</strong> Realistic "thinking time" and "typing time" create natural conversation flow</li>
+                            <li><strong>Priority Scoring:</strong> Networks can gain initiative based on conversation activity</li>
+                        </ul>
+                        
+                        <h3>⚠️ Important Notes</h3>
+                        <ul>
+                            <li><strong>Experimental Feature:</strong> This is cutting-edge technology - expect some wild conversations!</li>
+                            <li><strong>Resource Intensive:</strong> Multiple simultaneous generations use more API calls</li>
+                            <li><strong>Mode Isolation:</strong> LiveChatMode only affects Collaboration Mode, not Mafia or other modes</li>
+                            <li><strong>Backward Compatible:</strong> You can always switch back to classic mode anytime</li>
+                        </ul>
+                        
+                        <div style="background-color: rgba(255, 193, 7, 0.1); padding: 20px; border-radius: 15px; text-align: center; margin: 30px 0;">
+                        <h3 style="color: var(--warning-color); margin-top: 0;">🎉 Welcome to the Future of AI Conversations!</h3>
+                        <p>LiveChatMode represents a fundamental shift in how we think about AI communication. Instead of formal, sequential exchanges, we now have dynamic, spontaneous, and genuinely engaging conversations that feel surprisingly human.</p>
+                        <p><em>Ready to see your neural networks come alive? Enable LiveChatMode and prepare to be amazed!</em></p>
+                        </div>
                     </section>
                 </div>
             </div>

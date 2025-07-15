@@ -3,6 +3,7 @@ import { NetworkManager } from './networkManager.js';
 import { UIManager } from './uiManager.js';
 import { PromptGenerator } from './promptGenerator.js';
 import { FileManager } from './fileManager.js';
+import { DialogueManager } from './dialogueManager.js';
 
 export class NeuralCollaborativeFramework {
     constructor() {
@@ -20,6 +21,9 @@ export class NeuralCollaborativeFramework {
         this.useCustomIterations = false;
         this.customIterationCycles = 1;
         this.unrestrictedMode = false; // New flag for unrestricted (uncensored) mode
+        this.infiniteMode = false; // New flag for infinite discussion mode
+        this.interfaceLanguage = 'en'; // Current interface language
+        this.languageTranslations = this.initializeLanguageTranslations();
         
         // Initialize File Manager
         this.fileManager = new FileManager();
@@ -33,6 +37,10 @@ export class NeuralCollaborativeFramework {
         // Initialize Prompt Generator
         this.promptGenerator = new PromptGenerator();
         
+        // Add dialogue manager for event-driven mode
+        this.dialogueManager = new DialogueManager();
+        this.mode = 'iterative'; // or 'event_driven'
+        
         // Only initialize event listeners if we're in collaboration mode
         if (window.location.hash !== '#mafia' && window.location.hash !== '#wiki') {
             this.initEventListeners();
@@ -41,12 +49,42 @@ export class NeuralCollaborativeFramework {
         
         // Set global reference to this instance
         window.neuralFramework = this;
+        
+        // Set up dialogue manager event listeners
+        this.setupDialogueManagerListeners();
+        
+        // Add live chat mode settings
+        this.liveChatMode = false;
+        this.initiativeEnabled = false;
+        this.fragmentedMessagesEnabled = false;
+        this.fragmentationLevel = 0.5; // 0 = single block, 1 = every sentence
+        this.activeGenerations = new Map(); // Track ongoing generations
+        this.messageQueue = [];
+        this.sequenceCounter = 0;
     }
     
     initEventListeners() {
         if (this.uiManager.elements.startBtn && this.uiManager.elements.resetBtn) {
             this.uiManager.elements.startBtn.addEventListener('click', () => this.startCollaboration());
             this.uiManager.elements.resetBtn.addEventListener('click', () => this.resetProject());
+            
+            // Add event listener for infinite mode toggle
+            if (document.getElementById('infinite-mode')) {
+                document.getElementById('infinite-mode').addEventListener('change', (e) => {
+                    this.infiniteMode = e.target.checked;
+                    if (this.infiniteMode) {
+                        this.uiManager.addSystemMessage(this.translateText("Infinite mode enabled - discussion will continue indefinitely until manually stopped."));
+                    }
+                });
+            }
+            
+            // Add event listener for language switcher
+            if (document.getElementById('interface-language')) {
+                document.getElementById('interface-language').addEventListener('change', (e) => {
+                    this.interfaceLanguage = e.target.value;
+                    this.updateInterfaceLanguage();
+                });
+            }
             
             // Add event listener for continue discussion button
             if (this.uiManager.elements.continueDiscussionBtn) {
@@ -85,7 +123,356 @@ export class NeuralCollaborativeFramework {
         this.uiManager.elements.startBtn.disabled = true;
         
         this.uiManager.addSystemMessage(`Topic "${this.projectName}" initiated. Starting collaborative discussion.`);
-        this.startNewIteration();
+        
+        // Check live chat mode settings first
+        this.updateLiveChatSettings();
+        
+        // Always check for live chat mode first, regardless of other modes
+        if (this.liveChatMode) {
+            this.startLiveChatDiscussion();
+        } else if (this.mode === 'event_driven') {
+            this.startEventDrivenDiscussion();
+        } else {
+            this.startIterativeDiscussion();
+        }
+    }
+    
+    updateLiveChatSettings() {
+        // Get settings from UI elements that will be added
+        this.initiativeEnabled = document.getElementById('initiative-enabled')?.checked || false;
+        this.fragmentedMessagesEnabled = document.getElementById('fragmented-messages-enabled')?.checked || false;
+        this.fragmentationLevel = parseFloat(document.getElementById('fragmentation-level')?.value || 0.5);
+        this.liveChatMode = this.initiativeEnabled || this.fragmentedMessagesEnabled;
+        
+        // Update UI mode immediately
+        this.uiManager.updateChatMode(this.liveChatMode ? 'live' : 'classic');
+        
+        // Force live chat mode if either setting is enabled
+        if (this.liveChatMode) {
+            this.uiManager.showLiveChatInterface();
+        }
+    }
+    
+    async startLiveChatDiscussion() {
+        this.uiManager.addSystemMessage(this.translateText("Live Chat mode activated. Networks will communicate with initiative and dynamic responses."));
+        this.uiManager.showLiveChatInterface();
+        
+        const prompt = this.promptGenerator.createIterationPrompt(
+            this.projectName, 
+            this.projectDescription, 
+            1, 
+            this.acceptedSummaries
+        );
+        
+        // Get enabled networks
+        const enabledNetworks = this.getEnabledNetworks();
+        
+        if (enabledNetworks.length === 0) {
+            this.uiManager.addSystemMessage(this.translateText("Error: No networks are enabled."));
+            return;
+        }
+        
+        // Start infinite live chat if infinite mode is enabled
+        if (this.infiniteMode) {
+            this.startInfiniteLiveChat(enabledNetworks, prompt);
+        } else {
+            // Start race condition generation if initiative is enabled
+            if (this.initiativeEnabled) {
+                this.startRaceGeneration(enabledNetworks, prompt);
+            } else {
+                // Standard sequential with fragmentation
+                this.startSequentialLiveChat(enabledNetworks, prompt);
+            }
+        }
+    }
+    
+    async startInfiniteLiveChat(networks, prompt) {
+        this.uiManager.addSystemMessage(this.translateText("Infinite live chat started - networks will continue discussing indefinitely."));
+        
+        const runInfiniteRounds = async () => {
+            while (this.infiniteMode && !this.discussionPaused) {
+                if (this.initiativeEnabled) {
+                    await this.startRaceGeneration(networks, this.getUpdatedPromptWithContext());
+                } else {
+                    await this.startSequentialLiveChat(networks, this.getUpdatedPromptWithContext());
+                }
+                
+                // Add random delay between rounds (5-15 seconds)
+                await new Promise(resolve => setTimeout(resolve, Math.random() * 10000 + 5000));
+            }
+        };
+        
+        runInfiniteRounds();
+    }
+    
+    async startRaceGeneration(networks, prompt) {
+        const attachments = this.fileManager.getAttachments();
+        this.activeGenerations.clear(); // Clear any previous generations
+        
+        // Start all networks generating simultaneously with different delays
+        const generationPromises = networks.map(async (networkId, index) => {
+            // Add random startup delay to make race more realistic
+            const startupDelay = Math.random() * 2000 + (index * 300); // 0-2s + staggered start
+            await new Promise(resolve => setTimeout(resolve, startupDelay));
+            
+            return this.generateWithInitiative(networkId, prompt, attachments);
+        });
+        
+        // Use Promise.allSettled to handle all generations
+        try {
+            const results = await Promise.allSettled(generationPromises);
+            const successfulResults = results
+                .filter(result => result.status === 'fulfilled' && result.value)
+                .map(result => result.value)
+                .sort((a, b) => a.timestamp - b.timestamp); // Sort by completion time
+            
+            if (successfulResults.length > 0) {
+                // Process all successful generations in order
+                for (const result of successfulResults) {
+                    await this.handleRaceWinner(result, networks);
+                    // Small delay between processing results
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+                
+                // Start next round with random chance
+                if (Math.random() < 0.6) { // 60% chance to continue
+                    setTimeout(() => {
+                        const updatedPrompt = this.getUpdatedPromptWithContext();
+                        this.startRaceGeneration(networks, updatedPrompt);
+                    }, Math.random() * 3000 + 2000); // 2-5 second delay
+                }
+            }
+        } catch (error) {
+            console.error("Race generation error:", error);
+        }
+    }
+    
+    async generateWithInitiative(networkId, prompt, attachments) {
+        // More varied thinking times based on network characteristics
+        const networkDelays = {
+            'network1': [2000, 4000], // Analytical - takes time to think
+            'network2': [1000, 3000], // Creative - quicker bursts
+            'network3': [1500, 3500], // Implementation - moderate
+            'network4': [2500, 4500], // Data Science - thorough analysis
+            'network5': [2000, 4000], // Ethical - careful consideration
+            'network6': [1500, 3000], // UX - user-focused speed
+            'network7': [3000, 5000], // Systems - comprehensive view
+            'network8': [1000, 2500]  // Devil's Advocate - quick challenges
+        };
+        
+        const delays = networkDelays[networkId] || [1500, 3500];
+        const thinkingTime = Math.random() * (delays[1] - delays[0]) + delays[0];
+        
+        await new Promise(resolve => setTimeout(resolve, thinkingTime));
+        
+        this.uiManager.updateNetworkStatus(networkId);
+        
+        try {
+            let response;
+            if (this.fragmentedMessagesEnabled) {
+                response = await this.generateFragmentedMessage(networkId, prompt, attachments);
+            } else {
+                response = await this.networkManager.generateNetworkResponse(networkId, prompt, attachments);
+            }
+            
+            return { networkId, response, timestamp: Date.now() };
+        } catch (error) {
+            console.error(`Generation error for ${networkId}:`, error);
+            // Return a fallback response instead of null
+            return { 
+                networkId, 
+                response: this.getRoleBasedResponse(networkId), 
+                timestamp: Date.now() 
+            };
+        }
+    }
+    
+    async generateFragmentedMessage(networkId, prompt, attachments) {
+        const fragmentPrompt = prompt + `\n\nIMPORTANT: You should respond naturally and conversationally. If you have multiple thoughts, you can send them as separate short messages by ending with [CONTINUE] to send another message, or [END] when you're done. Each message should feel natural and spontaneous, like in a real conversation. Avoid generic responses and focus on your specific role as ${this.networkManager.networks[networkId].name}.`;
+        
+        const fragments = [];
+        let continueGeneration = true;
+        let fragmentCount = 0;
+        const maxFragments = Math.max(1, Math.ceil(3 * this.fragmentationLevel) + 1); // 1-4 fragments based on level
+        
+        while (continueGeneration && fragmentCount < maxFragments) {
+            const contextualPrompt = fragmentCount === 0 ? 
+                fragmentPrompt : 
+                `${fragmentPrompt}\n\nYour previous messages in this sequence: ${fragments.join(' ')}\nContinue with your next thought or conclude with [END]:`;
+                
+            try {
+                const response = await this.networkManager.generateNetworkResponse(networkId, contextualPrompt, attachments);
+                
+                // Check if response indicates continuation
+                if (response.includes('[CONTINUE]') && Math.random() < this.fragmentationLevel) {
+                    fragments.push(response.replace('[CONTINUE]', '').trim());
+                    continueGeneration = true;
+                } else {
+                    fragments.push(response.replace(/\[(CONTINUE|END)\]/g, '').trim());
+                    continueGeneration = false;
+                }
+                
+                fragmentCount++;
+                
+                // Small delay between fragments for realistic typing
+                if (continueGeneration && fragmentCount < maxFragments) {
+                    await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 1200));
+                }
+            } catch (error) {
+                console.error(`Fragment generation error for ${networkId}:`, error);
+                if (fragments.length === 0) {
+                    // Provide a fallback if no fragments were generated
+                    const roleBasedResponse = this.getRoleBasedResponse(networkId);
+                    fragments.push(roleBasedResponse);
+                }
+                break;
+            }
+        }
+        
+        return fragments.length > 0 ? fragments : [this.getRoleBasedResponse(networkId)];
+    }
+    
+    getRoleBasedResponse(networkId) {
+        const responses = {
+            'network1': "I'm analyzing the key components of this topic systematically.",
+            'network2': "Let me explore some creative angles on this discussion.",
+            'network3': "From a practical standpoint, here's what I'm considering.",
+            'network4': "Looking at this through a data-driven lens.",
+            'network5': "I want to examine the ethical implications here.",
+            'network6': "Thinking about the user experience aspects.",
+            'network7': "Taking a holistic systems view of this topic.",
+            'network8': "I need to challenge some assumptions here."
+        };
+        return responses[networkId] || "I'm contributing my perspective to this discussion.";
+    }
+    
+    async handleRaceWinner(winner, allNetworks) {
+        if (!winner) return;
+        
+        const { networkId, response } = winner;
+        this.sequenceCounter++;
+        
+        // Post the winning message(s)
+        if (Array.isArray(response)) {
+            // Fragmented message
+            for (let i = 0; i < response.length; i++) {
+                const messageId = await this.postLiveChatMessage(
+                    networkId, 
+                    response[i], 
+                    i > 0 ? `${this.sequenceCounter}-${i-1}` : null,
+                    `${this.sequenceCounter}-${i}`
+                );
+                
+                // Small delay between fragments for visual effect
+                if (i < response.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 800));
+                }
+            }
+        } else {
+            // Single message
+            await this.postLiveChatMessage(networkId, response, null, `${this.sequenceCounter}-0`);
+        }
+        
+        // Clean up this generation
+        this.activeGenerations.delete(networkId);
+        
+        // Other networks may reconsider their response
+        const remainingNetworks = allNetworks.filter(id => id !== networkId && this.activeGenerations.has(id));
+        
+        for (const id of remainingNetworks) {
+            // Cancel ongoing generation and potentially restart
+            this.activeGenerations.delete(id);
+            
+            // 30% chance to give up, 70% chance to reconsider
+            if (Math.random() > 0.3) {
+                const newPrompt = this.getUpdatedPromptWithContext();
+                setTimeout(() => {
+                    this.generateWithInitiative(id, newPrompt, this.fileManager.getAttachments())
+                        .then(result => {
+                            if (result) {
+                                this.handleRaceWinner(result, [id]);
+                            }
+                        });
+                }, Math.random() * 2000 + 500); // 0.5-2.5 second delay
+            }
+        }
+        
+        // Check if any network wants to continue immediately
+        if (Math.random() < 0.4) { // 40% chance the winner continues
+            setTimeout(() => {
+                const continuationPrompt = this.getUpdatedPromptWithContext() + "\n\nYou may continue your thought or respond to the current discussion.";
+                this.generateWithInitiative(networkId, continuationPrompt, this.fileManager.getAttachments())
+                    .then(result => {
+                        if (result) {
+                            this.handleRaceWinner(result, [networkId]);
+                        }
+                    });
+            }, Math.random() * 3000 + 1000); // 1-4 second delay
+        }
+    }
+    
+    async postLiveChatMessage(networkId, content, parentId, sequenceId) {
+        const messageId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+        
+        const messageData = {
+            id: messageId,
+            networkId,
+            content,
+            parentId,
+            sequenceId,
+            timestamp: Date.now(),
+            isFragment: !!parentId
+        };
+        
+        // Add to discussion history
+        this.discussionHistory.push({
+            role: networkId, 
+            content,
+            messageId,
+            parentId,
+            sequenceId
+        });
+        
+        // Update UI
+        this.uiManager.addLiveChatMessage(networkId, this.networkManager.networks[networkId].name, content, messageData);
+        
+        return messageId;
+    }
+    
+    getUpdatedPromptWithContext() {
+        let context = `Topic: ${this.projectName}\nDescription: ${this.projectDescription}\n\n`;
+        
+        // Get recent messages for context
+        const recentMessages = this.discussionHistory.slice(-10);
+        context += "Recent discussion:\n";
+        
+        recentMessages.forEach(msg => {
+            const networkName = this.networkManager.networks[msg.role]?.name || msg.role;
+            context += `${networkName}: ${msg.content}\n`;
+        });
+        
+        return context;
+    }
+    
+    getEnabledNetworks() {
+        return this.networkManager.getNetworkIds().filter(id => {
+            const networkNum = id.replace('network', '');
+            return (this.networkManager.modelSettings[`use_${id}`] !== false) ||
+                   (this.uiManager.elements[`use${networkNum}`] && 
+                    this.uiManager.elements[`use${networkNum}`].checked);
+        });
+    }
+    
+    async startSequentialLiveChat(networks, prompt) {
+        for (const networkId of networks) {
+            const result = await this.generateWithInitiative(networkId, prompt, this.fileManager.getAttachments());
+            if (result) {
+                await this.handleRaceWinner(result, [networkId]);
+                
+                // Delay before next network
+                await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+            }
+        }
     }
     
     updateModelSettings() {
@@ -147,247 +534,112 @@ export class NeuralCollaborativeFramework {
         
         // Check which networks are enabled
         const modelSettings = this.networkManager.modelSettings;
-        const useNetwork1 = modelSettings.use_network1 !== false; // Default to true if not explicitly set to false
-        const useNetwork2 = modelSettings.use_network2 !== false; // Default to true if not explicitly set to false
+        const enabledNetworks = this.networkManager.getNetworkIds().filter(id => {
+            const networkNum = id.replace('network', '');
+            // Check if this network is enabled
+            return (this.networkManager.modelSettings[`use_${id}`] !== false) ||
+                   (this.uiManager.elements[`use${networkNum}`] && 
+                    this.uiManager.elements[`use${networkNum}`].checked);
+        });
         
-        // Start with Network 1 if enabled
-        if (useNetwork1) {
-            this.uiManager.updateNetworkStatus('network1');
-            await this.uiManager.simulateThinking('network1', this.networkManager.networks);
+        if (enabledNetworks.length === 0) {
+            this.uiManager.addSystemMessage("Error: No networks are enabled. Please enable at least one network.");
+            this.currentState = 'idle';
+            this.uiManager.elements.startBtn.disabled = false;
+            this.uiManager.hidePauseButton();
+            return;
+        }
+        
+        // Process each enabled network
+        for (const networkId of enabledNetworks) {
+            this.uiManager.updateNetworkStatus(networkId);
+            await this.uiManager.simulateThinking(networkId, this.networkManager.networks);
             
             try {
-                // Store the current operation to be able to abort it
-                const network1Response = await this.networkManager.generateNetworkResponse('network1', prompt, attachments);
-                
+                const contextForNetwork = this.getDiscussionContext();
+                const networkResponse = await this.networkManager.generateNetworkResponse(networkId, contextForNetwork, attachments);
+                this.discussionHistory.push({role: networkId, content: networkResponse});
+                this.uiManager.addMessageToChat(networkId, this.networkManager.networks[networkId].name, networkResponse);
+            } catch (error) {
+                console.error(`Error generating response for ${networkId}:`, error);
                 if (this.discussionPaused) return;
+            }
+        }
+        
+        // Additional exchange rounds (can be configured)
+        const exchangeRounds = this.useCustomIterations ? this.customIterationCycles : 1;
+        for (let i = 1; i < exchangeRounds; i++) {
+            for (const networkId of enabledNetworks) {
+                this.uiManager.updateNetworkStatus(networkId);
+                await this.uiManager.simulateThinking(networkId, this.networkManager.networks);
                 
-                this.discussionHistory.push({role: 'network1', content: network1Response});
-                this.uiManager.addMessageToChat('network1', this.networkManager.networks.network1.name, network1Response);
-                
-                // Only proceed to Network 2 if it's enabled
-                if (useNetwork2) {
-                    // Network 2 response
-                    this.uiManager.updateNetworkStatus('network2');
-                    await this.uiManager.simulateThinking('network2', this.networkManager.networks);
-                    const contextForNetwork2 = `${prompt}\n\n${this.networkManager.networks.network1.name} said: ${network1Response}`;
-                    const network2Response = await this.networkManager.generateNetworkResponse('network2', contextForNetwork2, attachments);
-                    this.discussionHistory.push({role: 'network2', content: network2Response});
-                    this.uiManager.addMessageToChat('network2', this.networkManager.networks.network2.name, network2Response);
-                }
-                
-                // Process additional networks
-                const additionalNetworks = [];
-                
-                // Get all network IDs except network1, network2, and summarizer
-                const networkIds = this.networkManager.getNetworkIds().filter(id => 
-                    id !== 'network1' && id !== 'network2' && id !== 'summarizer'
-                );
-                
-                // Filter to only enabled networks
-                for (const networkId of networkIds) {
-                    const networkNum = networkId.replace('network', '');
-                    
-                    // Check if this network is enabled (either specifically or with the legacy naming pattern)
-                    if (modelSettings[`use_${networkId}`] || modelSettings[`use_network${networkNum}`] || 
-                        (this.uiManager.elements[`use${networkNum}`] && this.uiManager.elements[`use${networkNum}`].checked)) {
-                        additionalNetworks.push(networkId);
-                    }
-                }
-                
-                // Process additional networks
-                for (const networkId of additionalNetworks) {
-                    const networkNum = networkId.replace('network', '');
-                    
-                    // Show network status
-                    this.uiManager.toggleNetworkVisibility(parseInt(networkNum), true);
-                    this.uiManager.updateNetworkStatus(networkId);
-                    
-                    // Get network response
-                    await this.uiManager.simulateThinking(networkId, this.networkManager.networks);
+                try {
                     const contextForNetwork = this.getDiscussionContext();
                     const networkResponse = await this.networkManager.generateNetworkResponse(networkId, contextForNetwork, attachments);
                     this.discussionHistory.push({role: networkId, content: networkResponse});
                     this.uiManager.addMessageToChat(networkId, this.networkManager.networks[networkId].name, networkResponse);
-                }
-                
-                // Additional exchange rounds (can be configured)
-                const exchangeRounds = this.useCustomIterations ? this.customIterationCycles : 1;
-                for (let i = 0; i < exchangeRounds; i++) {
-                    // Network 1 responds again if enabled
-                    if (useNetwork1) {
-                        this.uiManager.updateNetworkStatus('network1');
-                        await this.uiManager.simulateThinking('network1', this.networkManager.networks);
-                        const contextForNetwork1 = this.getDiscussionContext();
-                        const network1Follow = await this.networkManager.generateNetworkResponse('network1', contextForNetwork1, attachments);
-                        this.discussionHistory.push({role: 'network1', content: network1Follow});
-                        this.uiManager.addMessageToChat('network1', this.networkManager.networks.network1.name, network1Follow);
-                    }
-                    
-                    // Network 2 responds again if enabled
-                    if (useNetwork2) {
-                        this.uiManager.updateNetworkStatus('network2');
-                        await this.uiManager.simulateThinking('network2', this.networkManager.networks);
-                        const contextForNetwork2Updated = this.getDiscussionContext();
-                        const network2Follow = await this.networkManager.generateNetworkResponse('network2', contextForNetwork2Updated, attachments);
-                        this.discussionHistory.push({role: 'network2', content: network2Follow});
-                        this.uiManager.addMessageToChat('network2', this.networkManager.networks.network2.name, network2Follow);
-                    }
-                    
-                    // Additional networks respond again - use the same additionalNetworks array to ensure consistency
-                    for (const networkId of additionalNetworks) {
-                        this.uiManager.updateNetworkStatus(networkId);
-                        await this.uiManager.simulateThinking(networkId, this.networkManager.networks);
-                        const contextForNetworkUpdated = this.getDiscussionContext();
-                        const networkFollow = await this.networkManager.generateNetworkResponse(networkId, contextForNetworkUpdated, attachments);
-                        this.discussionHistory.push({role: networkId, content: networkFollow});
-                        this.uiManager.addMessageToChat(networkId, this.networkManager.networks[networkId].name, networkFollow);
-                    }
-                }
-                
-                // Generate summary
-                this.currentState = 'summarizing';
-                this.uiManager.updateNetworkStatus('summarizer');
-                await this.uiManager.simulateThinking('summarizer', this.networkManager.networks, 2500);
-                const summaryContext = this.getDiscussionContext();
-                const summary = await this.networkManager.generateSummary(summaryContext, this.summarizerInstructions);
-                this.uiManager.addMessageToChat('summarizer', this.networkManager.networks.summarizer.name, summary);
-                
-                // Vote on summary
-                this.currentState = 'voting';
-                
-                // Get votes from each network
-                this.uiManager.updateNetworkStatus('network1');
-                await this.uiManager.simulateThinking('network1', this.networkManager.networks);
-                const network1Vote = await this.networkManager.getVoteOnSummary('network1', summary);
-                this.uiManager.addMessageToChat('network1', this.networkManager.networks.network1.name, network1Vote);
-                
-                this.uiManager.updateNetworkStatus('network2');
-                await this.uiManager.simulateThinking('network2', this.networkManager.networks);
-                const network2Vote = await this.networkManager.getVoteOnSummary('network2', summary);
-                this.uiManager.addMessageToChat('network2', this.networkManager.networks.network2.name, network2Vote);
-                
-                // Votes from additional networks if enabled
-                let additionalVotes = [];
-                
-                if (this.networkManager.modelSettings.use_network3) {
-                    this.uiManager.updateNetworkStatus('network3');
-                    await this.uiManager.simulateThinking('network3', this.networkManager.networks);
-                    const network3Vote = await this.networkManager.getVoteOnSummary('network3', summary);
-                    this.uiManager.addMessageToChat('network3', this.networkManager.networks.network3.name, network3Vote);
-                    additionalVotes.push({network: 'network3', vote: network3Vote});
-                }
-                
-                if (this.networkManager.modelSettings.use_network4) {
-                    this.uiManager.updateNetworkStatus('network4');
-                    await this.uiManager.simulateThinking('network4', this.networkManager.networks);
-                    const network4Vote = await this.networkManager.getVoteOnSummary('network4', summary);
-                    this.uiManager.addMessageToChat('network4', this.networkManager.networks.network4.name, network4Vote);
-                    additionalVotes.push({network: 'network4', vote: network4Vote});
-                }
-                
-                if (this.networkManager.modelSettings.use_network5) {
-                    this.uiManager.updateNetworkStatus('network5');
-                    await this.uiManager.simulateThinking('network5', this.networkManager.networks);
-                    const network5Vote = await this.networkManager.getVoteOnSummary('network5', summary);
-                    this.uiManager.addMessageToChat('network5', this.networkManager.networks.network5.name, network5Vote);
-                    additionalVotes.push({network: 'network5', vote: network5Vote});
-                }
-                
-                if (this.networkManager.modelSettings.use_network6) {
-                    this.uiManager.updateNetworkStatus('network6');
-                    await this.uiManager.simulateThinking('network6', this.networkManager.networks);
-                    const network6Vote = await this.networkManager.getVoteOnSummary('network6', summary);
-                    this.uiManager.addMessageToChat('network6', this.networkManager.networks.network6.name, network6Vote);
-                    additionalVotes.push({network: 'network6', vote: network6Vote});
-                }
-                
-                if (this.networkManager.modelSettings.use_network7) {
-                    this.uiManager.updateNetworkStatus('network7');
-                    await this.uiManager.simulateThinking('network7', this.networkManager.networks);
-                    const network7Vote = await this.networkManager.getVoteOnSummary('network7', summary);
-                    this.uiManager.addMessageToChat('network7', this.networkManager.networks.network7.name, network7Vote);
-                    additionalVotes.push({network: 'network7', vote: network7Vote});
-                }
-                
-                if (this.networkManager.modelSettings.use_network8) {
-                    this.uiManager.updateNetworkStatus('network8');
-                    await this.uiManager.simulateThinking('network8', this.networkManager.networks);
-                    const network8Vote = await this.networkManager.getVoteOnSummary('network8', summary);
-                    this.uiManager.addMessageToChat('network8', this.networkManager.networks.network8.name, network8Vote);
-                    additionalVotes.push({network: 'network8', vote: network8Vote});
-                }
-                
-                // Process voting results
-                const network1Accepts = 
-                    network1Vote.toLowerCase().includes('accept') || 
-                    network1Vote.toLowerCase().includes('agree') ||
-                    network1Vote.toLowerCase().includes('yes');
-                
-                const network2Accepts = 
-                    network2Vote.toLowerCase().includes('accept') || 
-                    network2Vote.toLowerCase().includes('agree') ||
-                    network2Vote.toLowerCase().includes('yes');
-                
-                // Check if any of the additional networks reject the summary
-                const allAdditionalAccept = additionalVotes.every(vote => {
-                    const accepts = 
-                        vote.vote.toLowerCase().includes('accept') || 
-                        vote.vote.toLowerCase().includes('agree') ||
-                        vote.vote.toLowerCase().includes('yes');
-                    return accepts;
-                });
-                
-                // Check if all networks accept the summary
-                const allAccept = network1Accepts && network2Accepts && allAdditionalAccept;
-                
-                if (allAccept) {
-                    this.acceptSummary(summary);
-                    this.uiManager.addSystemMessage("Summary accepted by all networks! Moving to the next iteration.");
-                    
-                    // Check if we should continue with more iterations
-                    if (this.iterations < this.maxIterations) {
-                        setTimeout(() => this.startNewIteration(), 1500);
-                    } else {
-                        this.finalizeDevelopment();
-                    }
-                } else {
-                    // Identify which networks rejected the summary
-                    let rejectingNetworks = [];
-                    if (!network1Accepts) rejectingNetworks.push(this.networkManager.networks.network1.name);
-                    if (!network2Accepts) rejectingNetworks.push(this.networkManager.networks.network2.name);
-                    
-                    // Add any additional rejecting networks
-                    additionalVotes.forEach(vote => {
-                        const accepts = 
-                            vote.vote.toLowerCase().includes('accept') || 
-                            vote.vote.toLowerCase().includes('agree') ||
-                            vote.vote.toLowerCase().includes('yes');
-                        
-                        if (!accepts) {
-                            const networkName = this.networkManager.networks[vote.network].name;
-                            rejectingNetworks.push(networkName);
-                        }
-                    });
-                    
-                    this.uiManager.addSystemMessage(`Summary was rejected. ${rejectingNetworks.join(', ')} disagreed. Starting a new discussion round.`);
-                    setTimeout(() => this.startNewIteration(), 1500);
-                }
-            } catch (error) {
-                if (error.name === 'AbortError') {
-                    // Gracefully handle abort
-                    console.log("Network1 response generation aborted");
-                } else {
-                    console.error("Error generating network1 response:", error);
-                    this.uiManager.addSystemMessage("Error occurred. Please try again.");
+                } catch (error) {
+                    console.error(`Error generating response for ${networkId} in round ${i+1}:`, error);
+                    if (this.discussionPaused) return;
                 }
             }
+        }
+        
+        // Generate summary
+        this.currentState = 'summarizing';
+        this.uiManager.updateNetworkStatus('summarizer');
+        await this.uiManager.simulateThinking('summarizer', this.networkManager.networks, 2500);
+        const summaryContext = this.getDiscussionContext();
+        const summary = await this.networkManager.generateSummary(summaryContext, this.summarizerInstructions);
+        this.uiManager.addMessageToChat('summarizer', this.networkManager.networks.summarizer.name, summary);
+        
+        // Vote on summary
+        this.currentState = 'voting';
+        
+        // Get votes from each enabled network
+        const votes = [];
+        for (const networkId of enabledNetworks) {
+            this.uiManager.updateNetworkStatus(networkId);
+            await this.uiManager.simulateThinking(networkId, this.networkManager.networks);
+            const networkVote = await this.networkManager.getVoteOnSummary(networkId, summary);
+            this.uiManager.addMessageToChat(networkId, this.networkManager.networks[networkId].name, networkVote);
+            
+            // Track if this network accepts the summary
+            const accepts = 
+                networkVote.toLowerCase().includes('accept') || 
+                networkVote.toLowerCase().includes('agree') ||
+                networkVote.toLowerCase().includes('yes');
+            
+            votes.push({ networkId, accepts });
+        }
+        
+        // Check if all networks accept the summary
+        const allAccept = votes.every(vote => vote.accepts);
+        
+        if (allAccept) {
+            this.acceptSummary(summary);
+            this.uiManager.addSystemMessage(this.translateText("Summary accepted by all networks! Moving to the next iteration."));
+            
+            // Check if we should continue with more iterations
+            if (this.iterations < this.maxIterations || this.infiniteMode) {
+                setTimeout(() => this.startNewIteration(), 1500);
+            } else {
+                this.finalizeDevelopment();
+            }
+        } else {
+            // Identify which networks rejected the summary
+            const rejectingNetworks = votes.filter(vote => !vote.accepts)
+                .map(vote => this.networkManager.networks[vote.networkId].name);
+            
+            this.uiManager.addSystemMessage(this.translateText(`Summary was rejected. ${rejectingNetworks.join(', ')} disagreed. Starting a new discussion round.`));
+            setTimeout(() => this.startNewIteration(), 1500);
         }
     }
     
     acceptSummary(summary) {
         this.acceptedSummaries.push(summary);
         this.uiManager.addSummaryToList(summary, this.iterations);
-        this.uiManager.addSystemMessage("Summary accepted! Moving to the next iteration.");
+        this.uiManager.addSystemMessage(this.translateText("Summary accepted! Moving to the next iteration."));
         
         // Clear discussion history for the next iteration but keep summaries
         this.discussionHistory = [];
@@ -395,7 +647,7 @@ export class NeuralCollaborativeFramework {
     
     async finalizeDevelopment() {
         this.currentState = 'finalizing';
-        this.uiManager.addSystemMessage("All iterations complete. Generating final output...");
+        this.uiManager.addSystemMessage(this.translateText("All iterations complete. Generating final output..."));
         
         this.uiManager.updateNetworkStatus('summarizer');
         this.uiManager.simulateThinking('summarizer', this.networkManager.networks, 3000).then(() => {
@@ -404,19 +656,139 @@ export class NeuralCollaborativeFramework {
                 this.uiManager.displayFinalOutput(finalOutput);
                 this.currentState = 'completed';
                 this.uiManager.updateNetworkStatus(null);
-                this.uiManager.addSystemMessage("Discussion process completed!");
+                this.uiManager.addSystemMessage(this.translateText("Discussion process completed!"));
                 this.uiManager.elements.resetBtn.disabled = false;
                 this.uiManager.hidePauseButton();
                 
                 // Save the discussion to local storage
                 this.saveCurrentDiscussion();
                 
-                // Show continue discussion button
-                if (this.uiManager.elements.continueDiscussionBtn) {
-                    this.uiManager.elements.continueDiscussionBtn.style.display = 'block';
+                // Check if infinite mode is enabled
+                if (this.infiniteMode) {
+                    setTimeout(() => {
+                        this.uiManager.addSystemMessage(this.translateText("Infinite mode active - continuing discussion..."));
+                        this.startContinuationIteration();
+                    }, 3000);
+                } else {
+                    // Show continue discussion button only if not in infinite mode
+                    if (this.uiManager.elements.continueDiscussionBtn) {
+                        this.uiManager.elements.continueDiscussionBtn.style.display = 'block';
+                    }
                 }
             });
         });
+    }
+    
+    startIterativeDiscussion() {
+        // Original iterative logic
+        this.startNewIteration();
+    }
+    
+    startEventDrivenDiscussion() {
+        // Register all enabled networks with dialogue manager
+        const enabledNetworks = this.networkManager.getNetworkIds().filter(id => {
+            const networkNum = id.replace('network', '');
+            return (this.networkManager.modelSettings[`use_${id}`] !== false) ||
+                   (this.uiManager.elements[`use${networkNum}`] && 
+                    this.uiManager.elements[`use${networkNum}`].checked);
+        });
+        
+        enabledNetworks.forEach(networkId => {
+            this.dialogueManager.registerModel(networkId);
+        });
+        
+        // Register summarizer
+        this.dialogueManager.registerModel('summarizer');
+        
+        // Start the dialogue manager
+        this.dialogueManager.start();
+        
+        // Post initial topic message
+        const initialPrompt = this.promptGenerator.createIterationPrompt(
+            this.projectName, 
+            this.projectDescription, 
+            1, 
+            this.acceptedSummaries
+        );
+        
+        this.dialogueManager.postMessage('system', initialPrompt);
+        
+        this.uiManager.addSystemMessage(this.translateText('Event-driven discussion started. Models will respond based on priority and initiative.'));
+        this.uiManager.showStreamInterface();
+    }
+    
+    setupDialogueManagerListeners() {
+        this.dialogueManager.addEventListener({
+            messagePosted: (message) => {
+                this.uiManager.addStreamMessage(message);
+            },
+            modelActivated: ({ modelId, model }) => {
+                this.uiManager.updateNetworkStatus(modelId, 'active');
+                this.uiManager.simulateThinking(modelId, this.networkManager.networks);
+            },
+            modelDeactivated: ({ modelId, model }) => {
+                this.uiManager.updateNetworkStatus(modelId, 'idle');
+            },
+            prioritiesUpdated: (models) => {
+                this.uiManager.updateModelPriorities(models);
+            },
+            generateRequest: async ({ modelId, context }) => {
+                try {
+                    const attachments = this.fileManager.getAttachments();
+                    const prompt = this.buildPromptFromContext(context);
+                    const response = await this.networkManager.generateNetworkResponse(modelId, prompt, attachments);
+                    await this.dialogueManager.postMessage(modelId, response);
+                } catch (error) {
+                    console.error(`Error generating response for ${modelId}:`, error);
+                }
+            },
+            summaryRequest: async (context) => {
+                try {
+                    const prompt = this.buildSummaryPromptFromContext(context);
+                    const summary = await this.networkManager.generateSummary(prompt, this.summarizerInstructions);
+                    const summaryMessage = await this.dialogueManager.postMessage('summarizer', summary);
+                    summaryMessage.isSummary = true;
+                    this.startSummaryVoting(summaryMessage);
+                } catch (error) {
+                    console.error('Error generating summary:', error);
+                }
+            }
+        });
+    }
+    
+    buildPromptFromContext(context) {
+        let prompt = `Topic Name: ${this.projectName}\nTopic Description: ${this.projectDescription}\n\n`;
+        
+        if (context.messages.length > 0) {
+            prompt += "Recent discussion:\n";
+            context.messages.forEach(msg => {
+                const authorName = msg.authorId === 'system' ? 'System' : 
+                                 this.networkManager.networks[msg.authorId]?.name || msg.authorId;
+                prompt += `${authorName}: ${msg.content}\n\n`;
+            });
+        }
+        
+        return prompt;
+    }
+    
+    buildSummaryPromptFromContext(context) {
+        return this.buildPromptFromContext(context) + 
+               "\n\nPlease provide a concise summary of the key points and agreements from this discussion.";
+    }
+    
+    async startSummaryVoting(summaryMessage) {
+        // Trigger voting from all active models
+        const activeModels = Array.from(this.dialogueManager.models.keys())
+            .filter(id => id !== 'summarizer' && id !== 'system');
+        
+        for (const modelId of activeModels) {
+            try {
+                const vote = await this.networkManager.getVoteOnSummary(modelId, summaryMessage.content);
+                await this.dialogueManager.postMessage(modelId, `Vote on summary: ${vote}`, summaryMessage.id);
+            } catch (error) {
+                console.error(`Error getting vote from ${modelId}:`, error);
+            }
+        }
     }
     
     resetProject() {
@@ -484,12 +856,15 @@ export class NeuralCollaborativeFramework {
             this.networkManager.updateNetworkSettings(networkId, currentSettings.networkSettings[networkId]);
         }
         
+        // Stop dialogue manager if running
+        this.dialogueManager.stop();
+        
         // Hide the continue discussion button
         if (this.uiManager.elements.continueDiscussionBtn) {
             this.uiManager.elements.continueDiscussionBtn.style.display = 'none';
         }
         
-        this.uiManager.addSystemMessage("Topic reset. Ready to start a new collaboration.");
+        this.uiManager.addSystemMessage(this.translateText("Topic reset. Ready to start a new collaboration."));
     }
     
     pauseDiscussion() {
@@ -522,7 +897,7 @@ export class NeuralCollaborativeFramework {
         if (this.currentState === 'discussing') {
             this.continueDiscussionWithUserPrompt(userPrompt);
         } else if (this.currentState === 'summarizing') {
-            this.summarizeWithUserPrompt(userPrompt);
+            this.continueWithSummarizingFromUserPrompt(userPrompt);
         } else if (this.currentState === 'voting') {
             this.continueVotingWithUserPrompt(userPrompt);
         }
@@ -562,7 +937,7 @@ export class NeuralCollaborativeFramework {
             this.continueDiscussion(lastNetworkIndex + 1);
         } catch (error) {
             console.error("Error continuing discussion:", error);
-            this.uiManager.addSystemMessage("Error occurred while continuing discussion. Please try again.");
+            this.uiManager.addSystemMessage(this.translateText("Error occurred while continuing discussion. Please try again."));
         }
     }
     
@@ -597,7 +972,7 @@ export class NeuralCollaborativeFramework {
         return enabledNetworks[nextIndex];
     }
     
-    async summarizeWithUserPrompt(userPrompt) {
+    async continueWithSummarizingFromUserPrompt(userPrompt) {
         // Handle summarization with user input
         this.uiManager.updateNetworkStatus('summarizer');
         await this.uiManager.simulateThinking('summarizer', this.networkManager.networks, 2000);
@@ -722,7 +1097,7 @@ export class NeuralCollaborativeFramework {
         }
         
         // Add a system message indicating continuation
-        this.uiManager.addSystemMessage("Continuing the discussion beyond the planned iterations...");
+        this.uiManager.addSystemMessage(this.translateText("Continuing the discussion beyond the planned iterations..."));
         
         // Reset state but maintain history
         this.currentState = 'discussing';
@@ -762,13 +1137,13 @@ export class NeuralCollaborativeFramework {
             // Just keep the discussion going with multiple exchanges
             
             // Add a "continue further" option after this round
-            this.uiManager.addSystemMessage("This continuation round is complete. You can reset or continue further.");
+            this.uiManager.addSystemMessage(this.translateText("This continuation round is complete. You can reset or continue further."));
             if (this.uiManager.elements.continueDiscussionBtn) {
                 this.uiManager.elements.continueDiscussionBtn.style.display = 'block';
             }
         } catch (error) {
             console.error("Error in continuation:", error);
-            this.uiManager.addSystemMessage("Error occurred during continuation. Please try again.");
+            this.uiManager.addSystemMessage(this.translateText("Error occurred during continuation. Please try again."));
         }
     }
     
@@ -911,21 +1286,120 @@ export class NeuralCollaborativeFramework {
         this.unrestrictedMode = enabled;
         this.updateModelSettings();
     }
-
-    async summarizeWithUserPrompt(userPrompt) {
-        // Handle summarization with user input
-        this.uiManager.updateNetworkStatus('summarizer');
-        await this.uiManager.simulateThinking('summarizer', this.networkManager.networks, 2000);
+    
+    setMode(mode) {
+        if (['iterative', 'event_driven'].includes(mode)) {
+            this.mode = mode;
+            this.uiManager.updateModeInterface(mode);
+        }
+    }
+    
+    initializeLanguageTranslations() {
+        return {
+            'Interface language changed to': {
+                'ru': 'Язык интерфейса изменен на',
+                'es': 'Idioma de la interfaz cambiado a',
+                'fr': 'Langue de l\'interface changée en',
+                'de': 'Sprache der Benutzeroberfläche geändert zu',
+                'zh': '界面语言更改为',
+                'ja': 'インターフェース言語を変更しました',
+                'ko': '인터페이스 언어가 다음으로 변경됨',
+                'ar': 'تم تغيير لغة الواجهة إلى',
+                'hi': 'इंटरफ़ेस भाषा को बदल दिया गया'
+            },
+            'Infinite mode enabled - discussion will continue indefinitely until manually stopped.': {
+                'ru': 'Бесконечный режим включен - обсуждение будет продолжаться бесконечно, пока не будет остановлено вручную.',
+                'es': 'Modo infinito habilitado: la discusión continuará indefinidamente hasta que se detenga manualmente.',
+                'fr': 'Mode infini activé - la discussion continuera indéfiniment jusqu\'à l\'arrêt manuel.',
+                'de': 'Unendlicher Modus aktiviert - Diskussion wird unbegrenzt fortgesetzt, bis manuell gestoppt.',
+                'zh': '无限模式已启用 - 讨论将无限期继续，直到手动停止。'
+            },
+            'All iterations complete. Generating final output...': {
+                'ru': 'Все итерации завершены. Генерируется финальный результат...',
+                'es': 'Todas las iteraciones completadas. Generando resultado final...',
+                'fr': 'Toutes les itérations terminées. Génération du résultat final...',
+                'de': 'Alle Iterationen abgeschlossen. Endergebnis wird generiert...',
+                'zh': '所有迭代完成。正在生成最终输出...'
+            },
+            'Discussion process completed!': {
+                'ru': 'Процесс обсуждения завершен!',
+                'es': '¡Proceso de discusión completado!',
+                'fr': 'Processus de discussion terminé !',
+                'de': 'Diskussionsprozess abgeschlossen!',
+                'zh': '讨论过程完成！'
+            },
+            'Summary accepted! Moving to the next iteration.': {
+                'ru': 'Резюме принято! Переход к следующей итерации.',
+                'es': '¡Resumen aceptado! Pasando a la siguiente iteración.',
+                'fr': 'Résumé accepté ! Passage à l\'itération suivante.',
+                'de': 'Zusammenfassung akzeptiert! Weiter zur nächsten Iteration.',
+                'zh': '摘要已接受！进入下一次迭代。'
+            },
+            'Live Chat mode activated. Networks will communicate with initiative and dynamic responses.': {
+                'ru': 'Режим живого чата активирован. Сети будут общаться с инициативой и динамическими ответами.',
+                'es': 'Modo de chat en vivo activado. Las redes se comunicarán con iniciativa y respuestas dinámicas.',
+                'fr': 'Mode chat en direct activé. Les réseaux communiqueront avec initiative et réponses dynamiques.',
+                'de': 'Live-Chat-Modus aktiviert. Netzwerke kommunizieren mit Initiative und dynamischen Antworten.',
+                'zh': '实时聊天模式已激活。网络将主动进行动态响应交流。'
+            },
+            'Error: No networks are enabled.': {
+                'ru': 'Ошибка: Ни одна сеть не включена.',
+                'es': 'Error: No hay redes habilitadas.',
+                'fr': 'Erreur : Aucun réseau n\'est activé.',
+                'de': 'Fehler: Keine Netzwerke aktiviert.',
+                'zh': '错误：没有启用的网络。'
+            },
+            'Infinite live chat started - networks will continue discussing indefinitely.': {
+                'ru': 'Бесконечный живой чат начат - сети будут обсуждать бесконечно.',
+                'es': 'Chat en vivo infinito iniciado: las redes continuarán discutiendo indefinidamente.',
+                'fr': 'Chat en direct infini démarré - les réseaux continueront à discuter indéfiniment.',
+                'de': 'Unendlicher Live-Chat gestartet - Netzwerke werden unbegrenzt diskutieren.',
+                'zh': '无限实时聊天开始 - 网络将无限期讨论。'
+            }
+        };
+    }
+    
+    translateText(text) {
+        if (this.interfaceLanguage === 'en') return text;
         
-        // Get the context with user prompt included
-        const summaryContext = this.getDiscussionContext() + `\nUser's additional guidance for summarization: ${userPrompt}\n`;
+        const translations = this.languageTranslations[text];
+        if (translations && translations[this.interfaceLanguage]) {
+            return translations[this.interfaceLanguage];
+        }
         
-        // Generate a summary with the user's additional guidance
-        const summary = await this.networkManager.generateSummary(summaryContext, userPrompt);
-        this.uiManager.addMessageToChat('summarizer', this.networkManager.networks.summarizer.name, summary);
+        return text; // Fallback to English if translation not found
+    }
+    
+    updateInterfaceLanguage() {
+        // Update all text elements in the interface
+        this.uiManager.updateLanguage(this.interfaceLanguage);
         
-        // Continue with voting phase
-        this.currentState = 'voting';
-        this.continueVoting();
+        // Update network manager language setting
+        this.networkManager.interfaceLanguage = this.interfaceLanguage;
+        
+        // Add system message about language change
+        this.uiManager.addSystemMessage(this.translateText(`Interface language changed to ${this.getLanguageName(this.interfaceLanguage)}.`));
+    }
+    
+    getLanguageName(code) {
+        const languageNames = {
+            'en': 'English',
+            'ru': 'Русский',
+            'es': 'Español',
+            'fr': 'Français',
+            'de': 'Deutsch',
+            'it': 'Italiano',
+            'pt': 'Português',
+            'zh': '中文',
+            'ja': '日本語',
+            'ko': '한국어',
+            'ar': 'العربية',
+            'hi': 'हिन्दी',
+            'tr': 'Türkçe',
+            'pl': 'Polski',
+            'nl': 'Nederlands'
+        };
+        
+        return languageNames[code] || code;
     }
 }

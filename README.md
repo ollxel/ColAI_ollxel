@@ -3,7 +3,7 @@
 > ⚠️ This project is designed to run **exclusively inside WebSim** — it relies on WebSim's internal LLM API and GGUF model handling.
 > 
 > ✅ First public commit: **May 9, 2025**
-> 🧾 The actual prototype existed **before** this date. Proof of concept was already in place prior to any public versions of NexusOfMind or similar projects.
+
 
 ---
 
@@ -11,7 +11,6 @@
 
 This is an experimental interface for interacting with LLMs inside WebSim, offering features such as:
 
-- Custom GGUF model selection
 - Full control over generation parameters (temperature, top-p, top-k, etc.)
 - Multi-model collaborative generation
 - Clean HTML + JavaScript UI (vanilla, no frameworks)
@@ -42,15 +41,6 @@ This repo predates several current implementations of local LLM frontends. It's 
 
 1. A **reference** implementation for WebSim-based UI integration
 2. A **timestamp** showing prior work before public alternatives appeared
-
----
-
-## 📂 Files
-
-- `index.html` — Main UI layout
-- `main.js` — Core logic + API calls
-- `styles.css` — Light UI styling
-- `config.json` — Editable model presets
 
 ---
 

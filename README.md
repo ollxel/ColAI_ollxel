@@ -3,8 +3,8 @@
 > ⚠️ This project is designed to run **exclusively inside WebSim** — it relies on WebSim's internal LLM API handling.
 > 
 > ✅ First public commit: **May 9, 2025**
-
-
+>
+> Original link on project: https://websim.com/@ollxel/col-ai // https://col-ai--ollxel.on.websim.com/
 ---
 
 ## 📌 About the project

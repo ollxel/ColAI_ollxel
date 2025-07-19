@@ -5,6 +5,8 @@
 > ✅ First public commit: **May 9, 2025**
 >
 > Original link on project: https://websim.com/@ollxel/col-ai // https://col-ai--ollxel.on.websim.com/
+>
+> Also you can run this project with local models on Python. Run neural_framework.py through Ollama
 ---
 
 ## 📌 About the project

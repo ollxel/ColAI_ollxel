@@ -1,10 +1,12 @@
 # 🧠 WebSim Neural Collaborative Interface
 
-> ⚠️ This project is designed to run **exclusively inside WebSim** — it relies on WebSim's internal LLM API and GGUF model handling.
+> ⚠️ This project is designed to run **exclusively inside WebSim** — it relies on WebSim's internal LLM API handling.
 > 
 > ✅ First public commit: **May 9, 2025**
-
-
+>
+> Original link on project: https://websim.com/@ollxel/col-ai // https://col-ai--ollxel.on.websim.com/
+>
+> Also you can run this project with local models on Python. Run neural_framework.py through Ollama
 ---
 
 ## 📌 About the project
@@ -24,7 +26,6 @@ The goal is to enable **fully local AI workflows** with direct control over ever
 - **HTML / CSS / JS** (Vanilla)
 - **WebSim internal APIs**
 - **WebLLM** backend integration (inside WebSim)
-- **GGUF model loader** with live parameter editing
 
 ---
 
